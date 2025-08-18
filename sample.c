@@ -15,6 +15,7 @@
 // We will assume the font data is provided in this header file.
 #include "font.h"
 
+
 // --- Configuration Constants ---
 #define SAMPLE_RATE 44100
 #define CHUNK_SIZE 2048
@@ -26,6 +27,7 @@
 #define SINE_WAVE_MIN_HZ 20
 #define SINE_WAVE_MAX_HZ 20000
 #define FONT_SIZE 12
+#define MAX_TRACKED_SINES 5
 
 #define VIS_HEIGHT 150         // Height of the visualization area
 #define VIS_PADDING 20         // Padding for the visualization
@@ -48,7 +50,6 @@ static SDL_Renderer* renderer = NULL;
 static TTF_Font* font = NULL;
 
 // Sine tracking structure
-#define MAX_TRACKED_SINES 5
 typedef struct {
     double freq;
     double purity;
@@ -59,6 +60,121 @@ typedef struct {
 
 static SineTrack tracks[MAX_TRACKED_SINES];
 static bool keep_running = true;
+
+/* ---------------------- Morse decoding helpers ---------------------- */
+typedef struct {
+    const char *code;
+    char        ch;
+} MorseEntry;
+
+static const MorseEntry MORSE_TABLE[] = {
+    {".-", 'A'},    {"-...", 'B'},  {"-.-.", 'C'}, {"-..", 'D'},
+    {".", 'E'},     {"..-.", 'F'},  {"--.", 'G'}, {"....", 'H'},
+    {"..", 'I'},    {".---", 'J'},  {"-.-", 'K'}, {".-..", 'L'},
+    {"--", 'M'},    {"-.", 'N'},    {"---", 'O'}, {".--.", 'P'},
+    {"--.-", 'Q'},  {".-.", 'R'},   {"...", 'S'}, {"-", 'T'},
+    {"..-", 'U'},   {"...-", 'V'},  {".--", 'W'}, {"-..-", 'X'},
+    {"-.--", 'Y'},  {"--..", 'Z'},
+    {".----", '1'}, {"..---", '2'}, {"...--", '3'}, {"....-", '4'},
+    {".....", '5'}, {"-....", '6'}, {"--...", '7'}, {"---..", '8'},
+    {"----.", '9'}, {"-----", '0'},
+    {NULL, 0}
+};
+
+static char lookup_morse(const char *code)
+{
+    for (const MorseEntry *e = MORSE_TABLE; e->code; ++e) {
+        if (strcmp(e->code, code) == 0)
+            return e->ch;
+    }
+    return '?';
+}
+
+typedef struct {
+    double threshold;
+    double max_power;
+    int prev;
+    int count;
+    char symbol[16];
+    int sym_len;
+    char pending_char;
+    bool pending_space;
+    bool reset_text;
+} MorseChannel;
+
+static MorseChannel morse_channels[MAX_TRACKED_SINES];
+static char decoded_text[MAX_TRACKED_SINES][256];
+
+static void morse_channel_init(MorseChannel *c)
+{
+    c->threshold = 0.5;
+    c->max_power = 1e-9;
+    c->prev = 0;
+    c->count = 0;
+    c->sym_len = 0;
+    c->pending_char = '\0';
+    c->pending_space = false;
+    c->reset_text = true;
+}
+
+static void morse_channel_flush(MorseChannel *c, bool add_space)
+{
+    if (c->sym_len) {
+        c->symbol[c->sym_len] = '\0';
+        c->pending_char = lookup_morse(c->symbol);
+        c->sym_len = 0;
+    }
+    if (add_space)
+        c->pending_space = true;
+    c->prev = 0;
+    c->count = 0;
+    c->max_power = 1e-9;
+}
+
+static void morse_channel_update(MorseChannel *c, double power)
+{
+    if (power > c->max_power)
+        c->max_power = power;
+    double env = c->max_power > 0.0 ? power / c->max_power : 0.0;
+    int cur = env > c->threshold;
+
+    if (c->count == 0) {
+        c->prev = cur;
+        c->count = 1;
+        return;
+    }
+
+    if (cur == c->prev) {
+        c->count++;
+        return;
+    }
+
+    const int dash_units = 3;
+    const int letter_gap_units = 3;
+    const int word_gap_units = 7;
+
+    if (c->prev) {
+        c->symbol[c->sym_len++] = (c->count < dash_units) ? '.' : '-';
+    } else {
+        if (c->count >= word_gap_units) {
+            if (c->sym_len) {
+                c->symbol[c->sym_len] = '\0';
+                c->pending_char = lookup_morse(c->symbol);
+                c->sym_len = 0;
+            }
+            c->pending_space = true;
+        } else if (c->count >= letter_gap_units) {
+            if (c->sym_len) {
+                c->symbol[c->sym_len] = '\0';
+                c->pending_char = lookup_morse(c->symbol);
+                c->sym_len = 0;
+            }
+        }
+    }
+
+    c->prev = cur;
+    c->count = 1;
+}
 
 // Logging support
 #define MAX_LOG_LINES 20
@@ -186,6 +302,11 @@ int main(int argc, char* argv[]) {
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Successfully opened audio device.");
     SDL_PauseAudioDevice(deviceId, 0); // Start capturing
 
+    for (int i = 0; i < MAX_TRACKED_SINES; ++i) {
+        morse_channel_init(&morse_channels[i]);
+        decoded_text[i][0] = '\0';
+    }
+
     // --- 6. Main Loop with Event Handling and Rendering ---
     SDL_Event event;
     while (keep_running) {
@@ -253,6 +374,28 @@ int main(int argc, char* argv[]) {
         SineTrack snapshot[MAX_TRACKED_SINES];
         SDL_LockAudioDevice(deviceId);
         memcpy(snapshot, tracks, sizeof(tracks));
+        for (int i = 0; i < MAX_TRACKED_SINES; ++i) {
+            if (morse_channels[i].reset_text) {
+                decoded_text[i][0] = '\0';
+                morse_channels[i].reset_text = false;
+            }
+            if (morse_channels[i].pending_char) {
+                size_t len = strlen(decoded_text[i]);
+                if (len < sizeof(decoded_text[i]) - 1) {
+                    decoded_text[i][len] = morse_channels[i].pending_char;
+                    decoded_text[i][len + 1] = '\0';
+                }
+                morse_channels[i].pending_char = '\0';
+            }
+            if (morse_channels[i].pending_space) {
+                size_t len = strlen(decoded_text[i]);
+                if (len < sizeof(decoded_text[i]) - 1) {
+                    decoded_text[i][len] = ' ';
+                    decoded_text[i][len + 1] = '\0';
+                }
+                morse_channels[i].pending_space = false;
+            }
+        }
         SDL_UnlockAudioDevice(deviceId);
 
         static bool prev_active[MAX_TRACKED_SINES] = {false};
@@ -313,8 +456,8 @@ int main(int argc, char* argv[]) {
         int active_count = 0;
         for (int i = 0; i < MAX_TRACKED_SINES; ++i) {
             if (snapshot[i].active) {
-                char output_text[100];
-                sprintf(output_text, "Sine wave detected! Freq: %.2f Hz | Purity: %.2f%%", snapshot[i].freq, snapshot[i].purity);
+                char output_text[256];
+                snprintf(output_text, sizeof(output_text), "Ch%d %.2f Hz: %s", i, snapshot[i].freq, decoded_text[i]);
                 render_text(output_text, 100, line_y, (SDL_Color){0, 255, 0, 255});
                 line_y += LINE_SPACING;
                 active_count++;
@@ -435,6 +578,7 @@ void update_track(double freq, double purity, Uint32 now) {
             tracks[match].start_time = now;
             tracks[match].last_seen = now;
             tracks[match].active = false;
+            morse_channel_init(&morse_channels[match]);
         } else {
             tracks[match].freq = tracks[match].freq * 0.9 + freq * 0.1;
             tracks[match].purity = purity * 100.0;
@@ -549,6 +693,14 @@ void audio_callback(void* userdata, Uint8* stream, int len) {
         }
     }
 
+    for (int i = 0; i < MAX_TRACKED_SINES; ++i) {
+        if (tracks[i].start_time != 0) {
+            int bin = (int)(tracks[i].freq / freq_resolution);
+            double pwr = (bin >= 0 && bin < FFT_SIZE / 2) ? powers[bin] : 0.0;
+            morse_channel_update(&morse_channels[i], pwr);
+        }
+    }
+
     // update track states
     for (int i = 0; i < MAX_TRACKED_SINES; ++i) {
         if (tracks[i].start_time != 0 && !tracks[i].active) {
@@ -559,6 +711,7 @@ void audio_callback(void* userdata, Uint8* stream, int len) {
         } else if (tracks[i].active) {
             if (now - tracks[i].last_seen >= (Uint32)persistence_threshold_ms) {
                 tracks[i].active = false;
+                morse_channel_flush(&morse_channels[i], true);
                 tracks[i].start_time = 0;
             }
         }

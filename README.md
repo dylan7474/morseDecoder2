@@ -17,3 +17,13 @@ make
 ```
 
 Each `<freq>` is the frequency in hertz to monitor. Press `Ctrl+C` to quit. A line containing `[space]` indicates a detected word gap.
+
+## Graphical interface
+
+`make` also builds `morsed-gui`, a graphical application based on the original sine wave detector. It automatically locks onto up to five sine waves and displays the decoded Morse code for each active channel.
+
+Run it with:
+
+```
+./morsed-gui
+```
