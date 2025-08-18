@@ -3,7 +3,7 @@
 # Assumes SDL2 and FFTW3 development libraries are installed
 
 CC = gcc
-TARGET = sinewave_detector
+TARGET = morsed
 SRCS = main.c
 CFLAGS = -Wall -O2 `sdl2-config --cflags` -I/usr/include/fftw3
 LDFLAGS = `sdl2-config --libs` -lSDL2_ttf -lfftw3 -lm
