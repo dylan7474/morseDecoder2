@@ -4,7 +4,7 @@
 # MinGW-w64 locations.
 
 CC = x86_64-w64-mingw32-gcc
-TARGET = sinDet.exe
+TARGET = morsed.exe
 SRCS = main.c
 CFLAGS = -Wall -O2 \
          -I/usr/x86_64-w64-mingw32/include/SDL2 \
