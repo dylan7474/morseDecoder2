@@ -189,7 +189,9 @@ static LogEntry log_entries[MAX_LOG_LINES];
 static int log_count = 0;
 
 // Detection persistence control
-static int persistence_threshold_ms = 200; // default 0.2s
+static int persistence_threshold_ms = 200; // time to lock on (ms)
+// Keep channel open after signal loss
+static int channel_hold_ms = 1000;       // hang time (ms)
 // Input gain control (dB)
 static double input_gain_db = 0.0; // 0 dB default
 // Band-pass filter settings
@@ -323,6 +325,12 @@ int main(int argc, char* argv[]) {
                     if (persistence_threshold_ms > 50) {
                         persistence_threshold_ms -= 50;
                     }
+                } else if (event.key.keysym.sym == SDLK_PAGEUP) {
+                    channel_hold_ms += 100;
+                } else if (event.key.keysym.sym == SDLK_PAGEDOWN) {
+                    if (channel_hold_ms > 100) {
+                        channel_hold_ms -= 100;
+                    }
                 } else if (event.key.keysym.sym == SDLK_RIGHT) {
                     input_gain_db += 1.0;
                 } else if (event.key.keysym.sym == SDLK_LEFT) {
@@ -436,21 +444,25 @@ int main(int argc, char* argv[]) {
         render_text("Z/X: low cutoff  C/V: high cutoff", 100, 140, color_white);
         render_text("A: toggle averaging", 100, 160, color_white);
         render_text("S/D/F: squelch toggle/adjust", 100, 180, color_white);
+        render_text("PgUp/PgDn: adjust hold", 100, 200, color_white);
         char persist_text[80];
         sprintf(persist_text, "Persistence: %d ms", persistence_threshold_ms);
-        render_text(persist_text, 100, 200, color_white);
+        render_text(persist_text, 100, 220, color_white);
+        char hold_text[80];
+        sprintf(hold_text, "Hold: %d ms", channel_hold_ms);
+        render_text(hold_text, 100, 240, color_white);
         char gain_text[80];
         sprintf(gain_text, "Gain: %.1f dB", input_gain_db);
-        render_text(gain_text, 100, 220, color_white);
+        render_text(gain_text, 100, 260, color_white);
         char band_text[120];
         sprintf(band_text, "Band-pass: %.0f-%.0f Hz", bandpass_low_hz, bandpass_high_hz);
-        render_text(band_text, 100, 240, color_white);
+        render_text(band_text, 100, 280, color_white);
         char avg_text[80];
         sprintf(avg_text, "Averaging: %s", averaging_enabled ? "ON" : "OFF");
-        render_text(avg_text, 100, 260, color_white);
+        render_text(avg_text, 100, 300, color_white);
         char squelch_text[80];
         sprintf(squelch_text, "Squelch: %s (%.0f%%)", squelch_enabled ? "ON" : "OFF", squelch_threshold * 100.0);
-        render_text(squelch_text, 100, 280, color_white);
+        render_text(squelch_text, 100, 320, color_white);
         // Render detection result
         int line_y = 300;
         int active_count = 0;
@@ -716,7 +728,7 @@ void audio_callback(void* userdata, Uint8* stream, int len) {
                 tracks[i].last_seen = now;
             }
         } else if (tracks[i].active) {
-            if (now - tracks[i].last_seen >= (Uint32)persistence_threshold_ms) {
+            if (now - tracks[i].last_seen >= (Uint32)channel_hold_ms) {
                 tracks[i].active = false;
                 morse_channel_flush(&morse_channels[i], true);
                 tracks[i].start_time = 0;
@@ -793,6 +805,7 @@ void save_config(void) {
         return;
     }
     fprintf(f, "persistence_threshold_ms=%d\n", persistence_threshold_ms);
+    fprintf(f, "channel_hold_ms=%d\n", channel_hold_ms);
     fprintf(f, "input_gain_db=%.2f\n", input_gain_db);
     fprintf(f, "bandpass_low_hz=%.2f\n", bandpass_low_hz);
     fprintf(f, "bandpass_high_hz=%.2f\n", bandpass_high_hz);
@@ -813,6 +826,8 @@ void load_config(void) {
         double d;
         if (sscanf(line, "persistence_threshold_ms=%d", &i) == 1) {
             persistence_threshold_ms = i;
+        } else if (sscanf(line, "channel_hold_ms=%d", &i) == 1) {
+            channel_hold_ms = i;
         } else if (sscanf(line, "input_gain_db=%lf", &d) == 1) {
             input_gain_db = d;
         } else if (sscanf(line, "bandpass_low_hz=%lf", &d) == 1) {
