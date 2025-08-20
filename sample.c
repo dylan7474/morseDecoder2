@@ -464,8 +464,9 @@ int main(int argc, char* argv[]) {
         char squelch_text[80];
         sprintf(squelch_text, "Squelch: %s (%.0f%%)", squelch_enabled ? "ON" : "OFF", squelch_threshold * 100.0);
         render_text(squelch_text, 100, 320, color_white);
-        // Render detection result
-        int line_y = 300;
+        // Render detection result just below the configuration text
+        // Start after the last static line (squelch at y=320)
+        int line_y = 320 + line_spacing;
         int active_count = 0;
         for (int i = 0; i < MAX_TRACKED_SINES; ++i) {
             if (snapshot[i].active) {
