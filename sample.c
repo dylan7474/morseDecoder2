@@ -457,8 +457,15 @@ int main(int argc, char* argv[]) {
         for (int i = 0; i < MAX_TRACKED_SINES; ++i) {
             if (snapshot[i].active) {
                 char output_text[256];
-                snprintf(output_text, sizeof(output_text), "Ch%d %.2f Hz: %s", i, snapshot[i].freq, decoded_text[i]);
-                render_text(output_text, 100, line_y, (SDL_Color){0, 255, 0, 255});
+                /* Limit the decoded text to fit within output_text to avoid
+                   potential truncation warnings. The channel and frequency
+                   text requires only a few characters, so we reserve the
+                   remaining space for the decoded message itself. */
+                snprintf(output_text, sizeof(output_text),
+                         "Ch%d %.2f Hz: %.240s",
+                         i, snapshot[i].freq, decoded_text[i]);
+                render_text(output_text, 100, line_y,
+                            (SDL_Color){0, 255, 0, 255});
                 line_y += LINE_SPACING;
                 active_count++;
             }
