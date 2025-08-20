@@ -116,8 +116,12 @@ static void channel_process(ChannelState *c, const float *samples, size_t len)
 
     if (c->prev) {
         const float DIT_ALPHA = 0.2f;
-        c->dit = (1.0f - DIT_ALPHA) * c->dit + DIT_ALPHA * duration;
-        c->symbol[c->sym_len++] = (duration < c->dit * 2.0f) ? '.' : '-';
+        if (duration < c->dit * 2.0f) {
+            c->symbol[c->sym_len++] = '.';
+            c->dit = (1.0f - DIT_ALPHA) * c->dit + DIT_ALPHA * duration;
+        } else {
+            c->symbol[c->sym_len++] = '-';
+        }
         printf("Channel %d symbol: %c\n", c->id, c->symbol[c->sym_len - 1]);
     } else {
         if (duration >= c->dit * 7.0f) {

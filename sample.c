@@ -171,8 +171,13 @@ static void morse_channel_update(MorseChannel *c, double power)
 
     if (c->prev) {
         const double DIT_ALPHA = 0.2;
-        c->dit = (1.0 - DIT_ALPHA) * c->dit + DIT_ALPHA * duration;
-        char sym = (duration < c->dit * 2.0) ? '.' : '-';
+        char sym;
+        if (duration < c->dit * 2.0) {
+            sym = '.';
+            c->dit = (1.0 - DIT_ALPHA) * c->dit + DIT_ALPHA * duration;
+        } else {
+            sym = '-';
+        }
         c->symbol[c->sym_len++] = sym;
         c->pending_symbol = sym;
     } else {
