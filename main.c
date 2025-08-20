@@ -105,6 +105,7 @@ static void channel_process(ChannelState *c, const float *samples, size_t len)
 
     if (c->prev) {
         c->symbol[c->sym_len++] = (c->count < dash_units) ? '.' : '-';
+        printf("Channel %d symbol: %c\n", c->id, c->symbol[c->sym_len - 1]);
     } else {
         if (c->count >= word_gap_units) {
             if (c->sym_len) {
@@ -121,6 +122,7 @@ static void channel_process(ChannelState *c, const float *samples, size_t len)
                 printf("Channel %d: %c\n", c->id, ch);
                 c->sym_len = 0;
             }
+            printf("Channel %d: [space]\n", c->id);
         }
     }
 
