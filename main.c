@@ -183,10 +183,9 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    /* create hidden window so we can receive keyboard events */
+    /* create small window to receive keyboard events */
     SDL_Window *win = SDL_CreateWindow("morsed", SDL_WINDOWPOS_UNDEFINED,
-                                      SDL_WINDOWPOS_UNDEFINED, 100, 100,
-                                      SDL_WINDOW_HIDDEN);
+                                      SDL_WINDOWPOS_UNDEFINED, 200, 100, 0);
     if (!win) {
         fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
         SDL_Quit();
@@ -202,15 +201,27 @@ int main(int argc, char **argv)
     want.samples = (Uint16)block;
     want.callback = NULL;
 
-    SDL_AudioDeviceID dev = SDL_OpenAudioDevice(NULL, 1, &want, &have, 0);
-    if (!dev) {
-        fprintf(stderr, "Failed to open audio device: %s\n", SDL_GetError());
+    SDL_AudioDeviceID in_dev = SDL_OpenAudioDevice(NULL, 1, &want, &have, 0);
+    if (!in_dev) {
+        fprintf(stderr, "Failed to open capture device: %s\n", SDL_GetError());
+        SDL_DestroyWindow(win);
         SDL_Quit();
         free(channels);
         return 1;
     }
 
-    SDL_PauseAudioDevice(dev, 0);
+    SDL_AudioDeviceID out_dev = SDL_OpenAudioDevice(NULL, 0, &want, NULL, 0);
+    if (!out_dev) {
+        fprintf(stderr, "Failed to open playback device: %s\n", SDL_GetError());
+        SDL_CloseAudioDevice(in_dev);
+        SDL_DestroyWindow(win);
+        SDL_Quit();
+        free(channels);
+        return 1;
+    }
+
+    SDL_PauseAudioDevice(in_dev, 0);
+    SDL_PauseAudioDevice(out_dev, 0);
     signal(SIGINT, handle_sigint);
 
     size_t bytes_per_sample = SDL_AUDIO_BITSIZE(have.format) / 8;
@@ -218,7 +229,7 @@ int main(int argc, char **argv)
     float *fbuf = malloc(block * sizeof(float));
     if (!ibuf || !fbuf) {
         fprintf(stderr, "Buffer allocation failed\n");
-        SDL_CloseAudioDevice(dev);
+        SDL_CloseAudioDevice(in_dev);
         SDL_Quit();
         free(channels);
         free(ibuf);
@@ -244,17 +255,21 @@ int main(int argc, char **argv)
         }
 
         if (key_down) {
+            SDL_ClearQueuedAudio(in_dev);
             for (size_t i = 0; i < block; ++i) {
-                fbuf[i] = sinf(phase);
+                float sample = sinf(phase);
                 phase += 2.0f * (float)M_PI * test_freq / (float)sample_rate;
                 if (phase > 2.0f * (float)M_PI)
                     phase -= 2.0f * (float)M_PI;
+                fbuf[i] = sample;
+                ibuf[i] = (int16_t)(sample * 32767.0f);
             }
+            SDL_QueueAudio(out_dev, ibuf, block * bytes_per_sample);
             for (int c = 0; c < channel_count; ++c)
                 channel_process(&channels[c], fbuf, block);
             SDL_Delay(block_ms);
-        } else if (SDL_GetQueuedAudioSize(dev) >= block * bytes_per_sample) {
-            SDL_DequeueAudio(dev, ibuf, block * bytes_per_sample);
+        } else if (SDL_GetQueuedAudioSize(in_dev) >= block * bytes_per_sample) {
+            SDL_DequeueAudio(in_dev, ibuf, block * bytes_per_sample);
             for (size_t i = 0; i < block; ++i)
                 fbuf[i] = (float)ibuf[i] / 32768.0f;
             for (int c = 0; c < channel_count; ++c)
@@ -264,7 +279,8 @@ int main(int argc, char **argv)
         }
     }
 
-    SDL_CloseAudioDevice(dev);
+    SDL_CloseAudioDevice(in_dev);
+    SDL_CloseAudioDevice(out_dev);
     SDL_DestroyWindow(win);
     SDL_Quit();
     free(channels);
