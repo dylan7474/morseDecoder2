@@ -155,6 +155,20 @@ static void handle_sigint(int sig)
     keep_running = 0;
 }
 
+static bool is_test_key(SDL_Scancode sc, SDL_Keycode sym)
+{
+    return sc == SDL_SCANCODE_PERIOD || sc == SDL_SCANCODE_COMMA ||
+           sc == SDL_SCANCODE_KP_PERIOD || sc == SDL_SCANCODE_SPACE ||
+           sym == SDLK_PERIOD || sym == SDLK_COMMA ||
+           sym == SDLK_KP_PERIOD || sym == SDLK_SPACE;
+}
+
+static bool is_period_key(SDL_Scancode sc, SDL_Keycode sym)
+{
+    return sc == SDL_SCANCODE_PERIOD || sym == SDLK_PERIOD ||
+           sc == SDL_SCANCODE_KP_PERIOD || sym == SDLK_KP_PERIOD;
+}
+
 /* -------------------------------- main --------------------------------- */
 int main(int argc, char **argv)
 {
@@ -177,11 +191,28 @@ int main(int argc, char **argv)
         channel_init(&channels[i], i, f, sample_rate);
     }
 
-    if (SDL_Init(SDL_INIT_AUDIO) < 0) {
+    if (SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO) < 0) {
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         free(channels);
         return 1;
     }
+
+    const char *build_timestamp = __DATE__ " " __TIME__;
+    SDL_LogSetAllPriority(SDL_LOG_PRIORITY_INFO);
+    SDL_Log("morsed build: %s", build_timestamp);
+
+    /* create small window to receive keyboard events */
+    char title[128];
+    snprintf(title, sizeof(title), "morsed - %s", build_timestamp);
+    SDL_Window *win = SDL_CreateWindow(title, SDL_WINDOWPOS_UNDEFINED,
+                                      SDL_WINDOWPOS_UNDEFINED, 200, 100, 0);
+    if (!win) {
+        fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
+        SDL_Quit();
+        free(channels);
+        return 1;
+    }
+    SDL_ShowWindow(win);
 
     SDL_AudioSpec want, have;
     SDL_zero(want);
@@ -191,15 +222,27 @@ int main(int argc, char **argv)
     want.samples = (Uint16)block;
     want.callback = NULL;
 
-    SDL_AudioDeviceID dev = SDL_OpenAudioDevice(NULL, 1, &want, &have, 0);
-    if (!dev) {
-        fprintf(stderr, "Failed to open audio device: %s\n", SDL_GetError());
+    SDL_AudioDeviceID in_dev = SDL_OpenAudioDevice(NULL, 1, &want, &have, 0);
+    if (!in_dev) {
+        fprintf(stderr, "Failed to open capture device: %s\n", SDL_GetError());
+        SDL_DestroyWindow(win);
         SDL_Quit();
         free(channels);
         return 1;
     }
 
-    SDL_PauseAudioDevice(dev, 0);
+    SDL_AudioDeviceID out_dev = SDL_OpenAudioDevice(NULL, 0, &want, NULL, 0);
+    if (!out_dev) {
+        fprintf(stderr, "Failed to open playback device: %s\n", SDL_GetError());
+        SDL_CloseAudioDevice(in_dev);
+        SDL_DestroyWindow(win);
+        SDL_Quit();
+        free(channels);
+        return 1;
+    }
+
+    SDL_PauseAudioDevice(in_dev, 0);
+    SDL_PauseAudioDevice(out_dev, 0);
     signal(SIGINT, handle_sigint);
 
     size_t bytes_per_sample = SDL_AUDIO_BITSIZE(have.format) / 8;
@@ -207,7 +250,7 @@ int main(int argc, char **argv)
     float *fbuf = malloc(block * sizeof(float));
     if (!ibuf || !fbuf) {
         fprintf(stderr, "Buffer allocation failed\n");
-        SDL_CloseAudioDevice(dev);
+        SDL_CloseAudioDevice(in_dev);
         SDL_Quit();
         free(channels);
         free(ibuf);
@@ -215,9 +258,52 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    bool key_down = false;
+    float phase = 0.0f;
+    float test_freq = channels[0].freq; /* use first channel for test tone */
+    Uint32 block_ms = (Uint32)((block * 1000) / sample_rate);
+
     while (keep_running) {
-        if (SDL_GetQueuedAudioSize(dev) >= block * bytes_per_sample) {
-            SDL_DequeueAudio(dev, ibuf, block * bytes_per_sample);
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+            if (e.type == SDL_QUIT ||
+                (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE)) {
+                keep_running = 0;
+            } else if (e.type == SDL_KEYDOWN) {
+                SDL_Scancode sc = e.key.keysym.scancode;
+                SDL_Keycode sym = e.key.keysym.sym;
+                if (is_test_key(sc, sym)) {
+                    if (is_period_key(sc, sym))
+                        SDL_Log("Period key pressed");
+                    key_down = true;
+                }
+            } else if (e.type == SDL_KEYUP) {
+                SDL_Scancode sc = e.key.keysym.scancode;
+                SDL_Keycode sym = e.key.keysym.sym;
+                if (is_test_key(sc, sym)) {
+                    if (is_period_key(sc, sym))
+                        SDL_Log("Period key released");
+                    key_down = false;
+                }
+            }
+        }
+
+        if (key_down) {
+            SDL_ClearQueuedAudio(in_dev);
+            for (size_t i = 0; i < block; ++i) {
+                float sample = sinf(phase);
+                phase += 2.0f * (float)M_PI * test_freq / (float)sample_rate;
+                if (phase > 2.0f * (float)M_PI)
+                    phase -= 2.0f * (float)M_PI;
+                fbuf[i] = sample;
+                ibuf[i] = (int16_t)(sample * 32767.0f);
+            }
+            SDL_QueueAudio(out_dev, ibuf, block * bytes_per_sample);
+            for (int c = 0; c < channel_count; ++c)
+                channel_process(&channels[c], fbuf, block);
+            SDL_Delay(block_ms);
+        } else if (SDL_GetQueuedAudioSize(in_dev) >= block * bytes_per_sample) {
+            SDL_DequeueAudio(in_dev, ibuf, block * bytes_per_sample);
             for (size_t i = 0; i < block; ++i)
                 fbuf[i] = (float)ibuf[i] / 32768.0f;
             for (int c = 0; c < channel_count; ++c)
@@ -227,7 +313,9 @@ int main(int argc, char **argv)
         }
     }
 
-    SDL_CloseAudioDevice(dev);
+    SDL_CloseAudioDevice(in_dev);
+    SDL_CloseAudioDevice(out_dev);
+    SDL_DestroyWindow(win);
     SDL_Quit();
     free(channels);
     free(ibuf);
