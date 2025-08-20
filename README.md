@@ -18,10 +18,11 @@ make
 
 Each `<freq>` is the frequency in hertz to monitor. Press `Ctrl+C` to quit. A line containing `[space]` indicates a detected word gap.
 
-Press the space bar while the `morsed` window has focus to inject an audible test
-tone at the first specified frequency. This can be used as a simple Morse key to
-verify decoding without external audio equipment. A log message is printed
-whenever the space bar is pressed so you can confirm it is being detected.
+Press the space bar while the `morsed` window has focus to inject an audible
+test tone at the first specified frequency. This can be used as a simple Morse
+key to verify decoding without external audio equipment. Each key press and
+release is logged with the SDL scancode and keycode so you can diagnose keyboard
+mapping issues.
 
 Run `./morsed -v` to print the build version based on the repository timestamp.
 

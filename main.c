@@ -7,7 +7,7 @@
 #include <signal.h>
 #include <SDL2/SDL.h>
 
-#define MORSED_VERSION "20250820.222916"
+#define MORSED_VERSION "20250820.223732"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -269,15 +269,21 @@ int main(int argc, char **argv)
             } else if (e.type == SDL_KEYDOWN) {
                 SDL_Scancode sc = e.key.keysym.scancode;
                 SDL_Keycode sym = e.key.keysym.sym;
+                SDL_Log("Key down: scancode=%d (%s) sym=0x%x (%s)",
+                        sc, SDL_GetScancodeName(sc), sym,
+                        SDL_GetKeyName(sym));
                 if (is_test_key(sc, sym)) {
-                    SDL_Log("Space key pressed");
+                    SDL_Log("Test key pressed");
                     key_down = true;
                 }
             } else if (e.type == SDL_KEYUP) {
                 SDL_Scancode sc = e.key.keysym.scancode;
                 SDL_Keycode sym = e.key.keysym.sym;
+                SDL_Log("Key up: scancode=%d (%s) sym=0x%x (%s)",
+                        sc, SDL_GetScancodeName(sc), sym,
+                        SDL_GetKeyName(sym));
                 if (is_test_key(sc, sym)) {
-                    SDL_Log("Space key released");
+                    SDL_Log("Test key released");
                     key_down = false;
                 }
             }
