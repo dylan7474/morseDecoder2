@@ -357,13 +357,15 @@ int main(int argc, char* argv[]) {
                 } else if (event.key.keysym.sym == SDLK_a) {
                     averaging_enabled = !averaging_enabled;
                     char log_text[128];
-                    sprintf(log_text, "Averaging %s", averaging_enabled ? "ON" : "OFF");
+                    snprintf(log_text, sizeof(log_text), "Averaging %s",
+                             averaging_enabled ? "ON" : "OFF");
                     Uint32 expire = SDL_GetTicks() + 2000;
                     add_log_line(log_text, (SDL_Color){0, 255, 255, 255}, expire, -1);
                 } else if (event.key.keysym.sym == SDLK_s) {
                     squelch_enabled = !squelch_enabled;
                     char log_text[128];
-                    sprintf(log_text, "Squelch %s", squelch_enabled ? "ON" : "OFF");
+                    snprintf(log_text, sizeof(log_text), "Squelch %s",
+                             squelch_enabled ? "ON" : "OFF");
                     Uint32 expire = SDL_GetTicks() + 2000;
                     add_log_line(log_text, (SDL_Color){0, 255, 255, 255}, expire, -1);
                 } else if (event.key.keysym.sym == SDLK_d) {
@@ -413,14 +415,17 @@ int main(int argc, char* argv[]) {
             if (snapshot[i].active) {
                 if (!prev_active[i] || fabs(snapshot[i].freq - prev_freq[i]) > FREQUENCY_TOLERANCE) {
                     char log_text[128];
-                    sprintf(log_text, "Detected %.2f Hz (%.2f%% purity)", snapshot[i].freq, snapshot[i].purity);
+                    snprintf(log_text, sizeof(log_text),
+                             "Detected %.2f Hz (%.2f%% purity)",
+                             snapshot[i].freq, snapshot[i].purity);
                     add_log_line(log_text, (SDL_Color){0, 255, 0, 255}, 0, i);
                 }
                 prev_active[i] = true;
                 prev_freq[i] = snapshot[i].freq;
             } else if (prev_active[i]) {
                 char log_text[128];
-                sprintf(log_text, "Lost %.2f Hz", prev_freq[i]);
+                snprintf(log_text, sizeof(log_text), "Lost %.2f Hz",
+                         prev_freq[i]);
                 Uint32 expire = SDL_GetTicks() + 3000;
                 add_log_line(log_text, (SDL_Color){255, 255, 0, 255}, expire, i);
                 for (int j = log_count - 1; j >= 0; --j) {
@@ -447,22 +452,31 @@ int main(int argc, char* argv[]) {
         render_text("S/D/F: squelch toggle/adjust", 100, 180, color_white);
         render_text("PgUp/PgDn: adjust hold", 100, 200, color_white);
         char persist_text[80];
-        sprintf(persist_text, "Persistence: %d ms", persistence_threshold_ms);
+        snprintf(persist_text, sizeof(persist_text),
+                 "Persistence: %d ms", persistence_threshold_ms);
         render_text(persist_text, 100, 220, color_white);
         char hold_text[80];
-        sprintf(hold_text, "Hold: %d ms", channel_hold_ms);
+        snprintf(hold_text, sizeof(hold_text), "Hold: %d ms",
+                 channel_hold_ms);
         render_text(hold_text, 100, 240, color_white);
         char gain_text[80];
-        sprintf(gain_text, "Gain: %.1f dB", input_gain_db);
+        snprintf(gain_text, sizeof(gain_text), "Gain: %.1f dB",
+                 input_gain_db);
         render_text(gain_text, 100, 260, color_white);
         char band_text[120];
-        sprintf(band_text, "Band-pass: %.0f-%.0f Hz", bandpass_low_hz, bandpass_high_hz);
+        snprintf(band_text, sizeof(band_text),
+                 "Band-pass: %.0f-%.0f Hz", bandpass_low_hz,
+                 bandpass_high_hz);
         render_text(band_text, 100, 280, color_white);
         char avg_text[80];
-        sprintf(avg_text, "Averaging: %s", averaging_enabled ? "ON" : "OFF");
+        snprintf(avg_text, sizeof(avg_text), "Averaging: %s",
+                 averaging_enabled ? "ON" : "OFF");
         render_text(avg_text, 100, 300, color_white);
         char squelch_text[80];
-        sprintf(squelch_text, "Squelch: %s (%.0f%%)", squelch_enabled ? "ON" : "OFF", squelch_threshold * 100.0);
+        snprintf(squelch_text, sizeof(squelch_text),
+                 "Squelch: %s (%.0f%%)",
+                 squelch_enabled ? "ON" : "OFF",
+                 squelch_threshold * 100.0);
         render_text(squelch_text, 100, 320, color_white);
         // Render detection result
         int line_y = 300;
