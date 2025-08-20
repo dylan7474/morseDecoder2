@@ -24,6 +24,9 @@ keyboard layout, the comma, keypad `.` or even the space bar can be used
 instead. This can be used as a simple Morse key to verify decoding without
 external audio equipment.
 
+The `morsed` window title includes the build date and time so you can confirm
+which binary version is running.
+
 The decoder assumes an initial speed of 15 words per minute to estimate
 the lengths of dits and dahs.
 

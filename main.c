@@ -183,8 +183,13 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    const char *build_timestamp = __DATE__ " " __TIME__;
+    printf("morsed build: %s\n", build_timestamp);
+
     /* create small window to receive keyboard events */
-    SDL_Window *win = SDL_CreateWindow("morsed", SDL_WINDOWPOS_UNDEFINED,
+    char title[128];
+    snprintf(title, sizeof(title), "morsed - %s", build_timestamp);
+    SDL_Window *win = SDL_CreateWindow(title, SDL_WINDOWPOS_UNDEFINED,
                                       SDL_WINDOWPOS_UNDEFINED, 200, 100, 0);
     if (!win) {
         fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
@@ -249,15 +254,15 @@ int main(int argc, char **argv)
                 (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE)) {
                 keep_running = 0;
             } else if (e.type == SDL_KEYDOWN) {
-                SDL_Keycode k = e.key.keysym.sym;
-                if (k == SDLK_PERIOD || k == SDLK_COMMA ||
-                    k == SDLK_KP_PERIOD || k == SDLK_SPACE) {
+                SDL_Scancode sc = e.key.keysym.scancode;
+                if (sc == SDL_SCANCODE_PERIOD || sc == SDL_SCANCODE_COMMA ||
+                    sc == SDL_SCANCODE_KP_PERIOD || sc == SDL_SCANCODE_SPACE) {
                     key_down = true;
                 }
             } else if (e.type == SDL_KEYUP) {
-                SDL_Keycode k = e.key.keysym.sym;
-                if (k == SDLK_PERIOD || k == SDLK_COMMA ||
-                    k == SDLK_KP_PERIOD || k == SDLK_SPACE) {
+                SDL_Scancode sc = e.key.keysym.scancode;
+                if (sc == SDL_SCANCODE_PERIOD || sc == SDL_SCANCODE_COMMA ||
+                    sc == SDL_SCANCODE_KP_PERIOD || sc == SDL_SCANCODE_SPACE) {
                     key_down = false;
                 }
             }
