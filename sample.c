@@ -178,7 +178,7 @@ static void morse_channel_update(MorseChannel *c, double power)
 
 // Logging support
 #define MAX_LOG_LINES 20
-#define LINE_SPACING (FONT_SIZE + 4)
+static int line_spacing = FONT_SIZE + 4;
 typedef struct {
     char text[256];
     SDL_Color color;
@@ -266,6 +266,7 @@ int main(int argc, char* argv[]) {
         cleanup();
         return 1;
     }
+    line_spacing = TTF_FontLineSkip(font);
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "Successfully initialized graphical interface.");
 
     // --- 4. FFT Setup ---
@@ -478,19 +479,19 @@ int main(int argc, char* argv[]) {
                          i, snapshot[i].freq, decoded_text[i]);
                 render_text(output_text, 100, line_y,
                             (SDL_Color){0, 255, 0, 255});
-                line_y += LINE_SPACING;
+                line_y += line_spacing;
                 active_count++;
             }
         }
         if (active_count == 0) {
             render_text("No pure sine wave detected. Listening...", 100, line_y, (SDL_Color){255, 255, 0, 255});
-            line_y += LINE_SPACING;
+            line_y += line_spacing;
         }
 
         // Render log lines
         prune_expired_logs(SDL_GetTicks());
         for (int i = 0; i < log_count; ++i) {
-            render_text(log_entries[i].text, 100, 400 + i * LINE_SPACING, log_entries[i].color);
+            render_text(log_entries[i].text, 100, 400 + i * line_spacing, log_entries[i].color);
         }
 
         // --- Render frequency spectrum visualization ---
