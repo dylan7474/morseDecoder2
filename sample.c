@@ -48,6 +48,8 @@ static bool averaging_enabled = false;  // Toggle for averaging filter
 static SDL_Window* window = NULL;
 static SDL_Renderer* renderer = NULL;
 static TTF_Font* font = NULL;
+static SDL_Window* morse_window = NULL;
+static SDL_Renderer* morse_renderer = NULL;
 
 // Sine tracking structure
 typedef struct {
@@ -98,12 +100,14 @@ typedef struct {
     char symbol[16];
     int sym_len;
     char pending_char;
+    char pending_symbol;
     bool pending_space;
     bool reset_text;
 } MorseChannel;
 
 static MorseChannel morse_channels[MAX_TRACKED_SINES];
 static char decoded_text[MAX_TRACKED_SINES][256];
+static char morse_symbols[MAX_TRACKED_SINES][256];
 
 static void morse_channel_init(MorseChannel *c)
 {
@@ -113,6 +117,7 @@ static void morse_channel_init(MorseChannel *c)
     c->count = 0;
     c->sym_len = 0;
     c->pending_char = '\0';
+    c->pending_symbol = '\0';
     c->pending_space = false;
     c->reset_text = true;
 }
@@ -154,7 +159,9 @@ static void morse_channel_update(MorseChannel *c, double power)
     const int word_gap_units = 7;
 
     if (c->prev) {
-        c->symbol[c->sym_len++] = (c->count < dash_units) ? '.' : '-';
+        char sym = (c->count < dash_units) ? '.' : '-';
+        c->symbol[c->sym_len++] = sym;
+        c->pending_symbol = sym;
     } else {
         if (c->count >= word_gap_units) {
             if (c->sym_len) {
@@ -204,6 +211,7 @@ static double squelch_threshold = 0.02; // normalized 0.0-1.0
 // --- Function Prototypes ---
 void log_error(const char* msg);
 void audio_callback(void* userdata, Uint8* stream, int len);
+void render_text_to(SDL_Renderer* target, const char* text, int x, int y, SDL_Color color);
 void render_text(const char* text, int x, int y, SDL_Color color);
 void add_log_line(const char* text, SDL_Color color, Uint32 expire_time, int track_id);
 void prune_expired_logs(Uint32 now);
@@ -246,6 +254,19 @@ int main(int argc, char* argv[]) {
     renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     if (!renderer) {
         log_error("Failed to create renderer");
+        cleanup();
+        return 1;
+    }
+
+    morse_window = SDL_CreateWindow("Morse Symbols", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 600, 200, 0);
+    if (!morse_window) {
+        log_error("Failed to create Morse window");
+        cleanup();
+        return 1;
+    }
+    morse_renderer = SDL_CreateRenderer(morse_window, -1, SDL_RENDERER_ACCELERATED);
+    if (!morse_renderer) {
+        log_error("Failed to create Morse renderer");
         cleanup();
         return 1;
     }
@@ -308,6 +329,7 @@ int main(int argc, char* argv[]) {
     for (int i = 0; i < MAX_TRACKED_SINES; ++i) {
         morse_channel_init(&morse_channels[i]);
         decoded_text[i][0] = '\0';
+        morse_symbols[i][0] = '\0';
     }
 
     // --- 6. Main Loop with Event Handling and Rendering ---
@@ -386,7 +408,18 @@ int main(int argc, char* argv[]) {
         for (int i = 0; i < MAX_TRACKED_SINES; ++i) {
             if (morse_channels[i].reset_text) {
                 decoded_text[i][0] = '\0';
+                morse_symbols[i][0] = '\0';
                 morse_channels[i].reset_text = false;
+            }
+            if (morse_channels[i].pending_symbol) {
+                size_t len = strlen(morse_symbols[i]);
+                if (len >= sizeof(morse_symbols[i]) - 1) {
+                    memmove(morse_symbols[i], morse_symbols[i] + 1, len - 1);
+                    len--;
+                }
+                morse_symbols[i][len] = morse_channels[i].pending_symbol;
+                morse_symbols[i][len + 1] = '\0';
+                morse_channels[i].pending_symbol = '\0';
             }
             if (morse_channels[i].pending_char) {
                 size_t len = strlen(decoded_text[i]);
@@ -402,6 +435,13 @@ int main(int argc, char* argv[]) {
                     decoded_text[i][len] = ' ';
                     decoded_text[i][len + 1] = '\0';
                 }
+                size_t slen = strlen(morse_symbols[i]);
+                if (slen >= sizeof(morse_symbols[i]) - 1) {
+                    memmove(morse_symbols[i], morse_symbols[i] + 1, slen - 1);
+                    slen--;
+                }
+                morse_symbols[i][slen] = ' ';
+                morse_symbols[i][slen + 1] = '\0';
                 morse_channels[i].pending_space = false;
             }
         }
@@ -565,6 +605,16 @@ int main(int argc, char* argv[]) {
         
         // Update the screen
         SDL_RenderPresent(renderer);
+
+        SDL_SetRenderDrawColor(morse_renderer, 0, 0, 0, 255);
+        SDL_RenderClear(morse_renderer);
+        SDL_Color mcolor = {255, 255, 255, 255};
+        for (int i = 0; i < MAX_TRACKED_SINES; ++i) {
+            char line[300];
+            snprintf(line, sizeof(line), "Ch%d: %.240s", i, morse_symbols[i]);
+            render_text_to(morse_renderer, line, 10, 10 + i * line_spacing, mcolor);
+        }
+        SDL_RenderPresent(morse_renderer);
 
         SDL_Delay(10);
     }
@@ -778,12 +828,12 @@ void prune_expired_logs(Uint32 now) {
     SDL_UnlockAudioDevice(deviceId);
 }
 
-void render_text(const char* text, int x, int y, SDL_Color color) {
+void render_text_to(SDL_Renderer* target, const char* text, int x, int y, SDL_Color color) {
     SDL_Surface* surface = TTF_RenderText_Solid(font, text, color);
     if (!surface) {
         return;
     }
-    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(target, surface);
     if (!texture) {
         SDL_FreeSurface(surface);
         return;
@@ -795,10 +845,14 @@ void render_text(const char* text, int x, int y, SDL_Color color) {
     rect.w = surface->w;
     rect.h = surface->h;
 
-    SDL_RenderCopy(renderer, texture, NULL, &rect);
+    SDL_RenderCopy(target, texture, NULL, &rect);
 
     SDL_FreeSurface(surface);
     SDL_DestroyTexture(texture);
+}
+
+void render_text(const char* text, int x, int y, SDL_Color color) {
+    render_text_to(renderer, text, x, y, color);
 }
 
 void save_config(void) {
@@ -874,8 +928,14 @@ void cleanup() {
     if (renderer) {
         SDL_DestroyRenderer(renderer);
     }
+    if (morse_renderer) {
+        SDL_DestroyRenderer(morse_renderer);
+    }
     if (window) {
         SDL_DestroyWindow(window);
+    }
+    if (morse_window) {
+        SDL_DestroyWindow(morse_window);
     }
     TTF_Quit();
     SDL_Quit();
