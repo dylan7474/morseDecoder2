@@ -19,8 +19,10 @@ make
 Each `<freq>` is the frequency in hertz to monitor. Press `Ctrl+C` to quit. A line containing `[space]` indicates a detected word gap.
 
 Press the `.` key while the `morsed` window has focus to inject an audible test
-tone at the first specified frequency. This can be used as a simple Morse key to
-verify decoding without external audio equipment.
+tone at the first specified frequency. If `.` does not trigger a tone on your
+keyboard layout, the comma, keypad `.` or even the space bar can be used
+instead. This can be used as a simple Morse key to verify decoding without
+external audio equipment.
 
 The decoder assumes an initial speed of 15 words per minute to estimate
 the lengths of dits and dahs.

@@ -245,12 +245,21 @@ int main(int argc, char **argv)
     while (keep_running) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_QUIT) {
+            if (e.type == SDL_QUIT ||
+                (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE)) {
                 keep_running = 0;
-            } else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_PERIOD) {
-                key_down = true;
-            } else if (e.type == SDL_KEYUP && e.key.keysym.sym == SDLK_PERIOD) {
-                key_down = false;
+            } else if (e.type == SDL_KEYDOWN) {
+                SDL_Keycode k = e.key.keysym.sym;
+                if (k == SDLK_PERIOD || k == SDLK_COMMA ||
+                    k == SDLK_KP_PERIOD || k == SDLK_SPACE) {
+                    key_down = true;
+                }
+            } else if (e.type == SDL_KEYUP) {
+                SDL_Keycode k = e.key.keysym.sym;
+                if (k == SDLK_PERIOD || k == SDLK_COMMA ||
+                    k == SDLK_KP_PERIOD || k == SDLK_SPACE) {
+                    key_down = false;
+                }
             }
         }
 
