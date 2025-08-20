@@ -57,7 +57,8 @@ typedef struct {
     double purity;
     Uint32 start_time;
     Uint32 last_seen;
-    bool active;
+    bool   active;
+    Uint32 display_until; // keep decoded text visible after loss
 } SineTrack;
 
 static SineTrack tracks[MAX_TRACKED_SINES];
@@ -421,9 +422,15 @@ int main(int argc, char* argv[]) {
         }
 
         SineTrack snapshot[MAX_TRACKED_SINES];
+        Uint32 now = SDL_GetTicks();
         SDL_LockAudioDevice(deviceId);
         memcpy(snapshot, tracks, sizeof(tracks));
         for (int i = 0; i < MAX_TRACKED_SINES; ++i) {
+            if (!tracks[i].active && tracks[i].display_until && now >= tracks[i].display_until) {
+                morse_channels[i].reset_text = true;
+                tracks[i].display_until = 0;
+                snapshot[i].display_until = 0;
+            }
             if (morse_channels[i].reset_text) {
                 decoded_text[i][0] = '\0';
                 morse_symbols[i][0] = '\0';
@@ -526,8 +533,9 @@ int main(int argc, char* argv[]) {
         // Start after the last static line (squelch at y=320)
         int line_y = 320 + line_spacing;
         int active_count = 0;
+        Uint32 now_render = SDL_GetTicks();
         for (int i = 0; i < MAX_TRACKED_SINES; ++i) {
-            if (snapshot[i].active) {
+            if (snapshot[i].active || (snapshot[i].display_until && now_render < snapshot[i].display_until)) {
                 char output_text[256];
                 /* Limit the decoded text to fit within output_text to avoid
                    potential truncation warnings. The channel and frequency
@@ -667,6 +675,7 @@ void update_track(double freq, double purity, Uint32 now) {
             tracks[match].start_time = now;
             tracks[match].last_seen = now;
             tracks[match].active = false;
+            tracks[match].display_until = 0;
             morse_channel_init(&morse_channels[match]);
         } else {
             tracks[match].freq = tracks[match].freq * 0.9 + freq * 0.1;
@@ -796,12 +805,14 @@ void audio_callback(void* userdata, Uint8* stream, int len) {
             if (now - tracks[i].start_time >= (Uint32)persistence_threshold_ms) {
                 tracks[i].active = true;
                 tracks[i].last_seen = now;
+                tracks[i].display_until = 0;
             }
         } else if (tracks[i].active) {
             if (now - tracks[i].last_seen >= (Uint32)channel_hold_ms) {
                 tracks[i].active = false;
                 morse_channel_flush(&morse_channels[i], true);
                 tracks[i].start_time = 0;
+                tracks[i].display_until = now + 3000; // keep decoded text briefly
             }
         }
     }
