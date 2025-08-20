@@ -177,8 +177,19 @@ int main(int argc, char **argv)
         channel_init(&channels[i], i, f, sample_rate);
     }
 
-    if (SDL_Init(SDL_INIT_AUDIO) < 0) {
+    if (SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO) < 0) {
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
+        free(channels);
+        return 1;
+    }
+
+    /* create hidden window so we can receive keyboard events */
+    SDL_Window *win = SDL_CreateWindow("morsed", SDL_WINDOWPOS_UNDEFINED,
+                                      SDL_WINDOWPOS_UNDEFINED, 100, 100,
+                                      SDL_WINDOW_HIDDEN);
+    if (!win) {
+        fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
+        SDL_Quit();
         free(channels);
         return 1;
     }
@@ -215,8 +226,34 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    bool key_down = false;
+    float phase = 0.0f;
+    float test_freq = channels[0].freq; /* use first channel for test tone */
+    Uint32 block_ms = (Uint32)((block * 1000) / sample_rate);
+
     while (keep_running) {
-        if (SDL_GetQueuedAudioSize(dev) >= block * bytes_per_sample) {
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+            if (e.type == SDL_QUIT) {
+                keep_running = 0;
+            } else if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_PERIOD) {
+                key_down = true;
+            } else if (e.type == SDL_KEYUP && e.key.keysym.sym == SDLK_PERIOD) {
+                key_down = false;
+            }
+        }
+
+        if (key_down) {
+            for (size_t i = 0; i < block; ++i) {
+                fbuf[i] = sinf(phase);
+                phase += 2.0f * (float)M_PI * test_freq / (float)sample_rate;
+                if (phase > 2.0f * (float)M_PI)
+                    phase -= 2.0f * (float)M_PI;
+            }
+            for (int c = 0; c < channel_count; ++c)
+                channel_process(&channels[c], fbuf, block);
+            SDL_Delay(block_ms);
+        } else if (SDL_GetQueuedAudioSize(dev) >= block * bytes_per_sample) {
             SDL_DequeueAudio(dev, ibuf, block * bytes_per_sample);
             for (size_t i = 0; i < block; ++i)
                 fbuf[i] = (float)ibuf[i] / 32768.0f;
@@ -228,6 +265,7 @@ int main(int argc, char **argv)
     }
 
     SDL_CloseAudioDevice(dev);
+    SDL_DestroyWindow(win);
     SDL_Quit();
     free(channels);
     free(ibuf);
