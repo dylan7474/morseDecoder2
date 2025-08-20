@@ -155,6 +155,20 @@ static void handle_sigint(int sig)
     keep_running = 0;
 }
 
+static bool is_test_key(SDL_Scancode sc, SDL_Keycode sym)
+{
+    return sc == SDL_SCANCODE_PERIOD || sc == SDL_SCANCODE_COMMA ||
+           sc == SDL_SCANCODE_KP_PERIOD || sc == SDL_SCANCODE_SPACE ||
+           sym == SDLK_PERIOD || sym == SDLK_COMMA ||
+           sym == SDLK_KP_PERIOD || sym == SDLK_SPACE;
+}
+
+static bool is_period_key(SDL_Scancode sc, SDL_Keycode sym)
+{
+    return sc == SDL_SCANCODE_PERIOD || sym == SDLK_PERIOD ||
+           sc == SDL_SCANCODE_KP_PERIOD || sym == SDLK_KP_PERIOD;
+}
+
 /* -------------------------------- main --------------------------------- */
 int main(int argc, char **argv)
 {
@@ -184,7 +198,8 @@ int main(int argc, char **argv)
     }
 
     const char *build_timestamp = __DATE__ " " __TIME__;
-    printf("morsed build: %s\n", build_timestamp);
+    SDL_LogSetAllPriority(SDL_LOG_PRIORITY_INFO);
+    SDL_Log("morsed build: %s", build_timestamp);
 
     /* create small window to receive keyboard events */
     char title[128];
@@ -197,6 +212,7 @@ int main(int argc, char **argv)
         free(channels);
         return 1;
     }
+    SDL_ShowWindow(win);
 
     SDL_AudioSpec want, have;
     SDL_zero(want);
@@ -255,14 +271,18 @@ int main(int argc, char **argv)
                 keep_running = 0;
             } else if (e.type == SDL_KEYDOWN) {
                 SDL_Scancode sc = e.key.keysym.scancode;
-                if (sc == SDL_SCANCODE_PERIOD || sc == SDL_SCANCODE_COMMA ||
-                    sc == SDL_SCANCODE_KP_PERIOD || sc == SDL_SCANCODE_SPACE) {
+                SDL_Keycode sym = e.key.keysym.sym;
+                if (is_test_key(sc, sym)) {
+                    if (is_period_key(sc, sym))
+                        SDL_Log("Period key pressed");
                     key_down = true;
                 }
             } else if (e.type == SDL_KEYUP) {
                 SDL_Scancode sc = e.key.keysym.scancode;
-                if (sc == SDL_SCANCODE_PERIOD || sc == SDL_SCANCODE_COMMA ||
-                    sc == SDL_SCANCODE_KP_PERIOD || sc == SDL_SCANCODE_SPACE) {
+                SDL_Keycode sym = e.key.keysym.sym;
+                if (is_test_key(sc, sym)) {
+                    if (is_period_key(sc, sym))
+                        SDL_Log("Period key released");
                     key_down = false;
                 }
             }
