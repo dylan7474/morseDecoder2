@@ -93,16 +93,18 @@ static char lookup_morse(const char *code)
 }
 
 typedef struct {
-    double threshold;
-    double max_power;
-    int prev;
-    int count;
-    char symbol[16];
-    int sym_len;
-    char pending_char;
-    char pending_symbol;
-    bool pending_space;
-    bool reset_text;
+    double avg_power;
+    double on_threshold;
+    double off_threshold;
+    int    prev;
+    int    count;
+    char   symbol[16];
+    int    sym_len;
+    char   pending_char;
+    char   pending_symbol;
+    bool   pending_space;
+    bool   reset_text;
+    double dit;
 } MorseChannel;
 
 static MorseChannel morse_channels[MAX_TRACKED_SINES];
@@ -111,8 +113,9 @@ static char morse_symbols[MAX_TRACKED_SINES][256];
 
 static void morse_channel_init(MorseChannel *c)
 {
-    c->threshold = 0.5;
-    c->max_power = 1e-9;
+    c->avg_power = 0.0;
+    c->on_threshold = 1.8;
+    c->off_threshold = 1.2;
     c->prev = 0;
     c->count = 0;
     c->sym_len = 0;
@@ -120,6 +123,7 @@ static void morse_channel_init(MorseChannel *c)
     c->pending_symbol = '\0';
     c->pending_space = false;
     c->reset_text = true;
+    c->dit = 1.2 / 15.0;
 }
 
 static void morse_channel_flush(MorseChannel *c, bool add_space)
@@ -133,15 +137,23 @@ static void morse_channel_flush(MorseChannel *c, bool add_space)
         c->pending_space = true;
     c->prev = 0;
     c->count = 0;
-    c->max_power = 1e-9;
+    c->avg_power = 0.0;
 }
 
 static void morse_channel_update(MorseChannel *c, double power)
 {
-    if (power > c->max_power)
-        c->max_power = power;
-    double env = c->max_power > 0.0 ? power / c->max_power : 0.0;
-    int cur = env > c->threshold;
+    const double ALPHA = 0.01;
+    if (c->avg_power == 0.0)
+        c->avg_power = power;
+    else
+        c->avg_power = (1.0 - ALPHA) * c->avg_power + ALPHA * power;
+
+    double ratio = (c->avg_power > 0.0) ? power / c->avg_power : 0.0;
+    int cur = c->prev;
+    if (ratio > c->on_threshold)
+        cur = 1;
+    else if (ratio < c->off_threshold)
+        cur = 0;
 
     if (c->count == 0) {
         c->prev = cur;
@@ -154,23 +166,29 @@ static void morse_channel_update(MorseChannel *c, double power)
         return;
     }
 
-    const int dash_units = 3;
-    const int letter_gap_units = 3;
-    const int word_gap_units = 7;
+    double block_time = (double)CHUNK_SIZE / SAMPLE_RATE;
+    double duration = c->count * block_time;
 
     if (c->prev) {
-        char sym = (c->count < dash_units) ? '.' : '-';
+        const double DIT_ALPHA = 0.2;
+        char sym;
+        if (duration < c->dit * 2.0) {
+            sym = '.';
+            c->dit = (1.0 - DIT_ALPHA) * c->dit + DIT_ALPHA * duration;
+        } else {
+            sym = '-';
+        }
         c->symbol[c->sym_len++] = sym;
         c->pending_symbol = sym;
     } else {
-        if (c->count >= word_gap_units) {
+        if (duration >= c->dit * 7.0) {
             if (c->sym_len) {
                 c->symbol[c->sym_len] = '\0';
                 c->pending_char = lookup_morse(c->symbol);
                 c->sym_len = 0;
             }
             c->pending_space = true;
-        } else if (c->count >= letter_gap_units) {
+        } else if (duration >= c->dit * 3.0) {
             if (c->sym_len) {
                 c->symbol[c->sym_len] = '\0';
                 c->pending_char = lookup_morse(c->symbol);
