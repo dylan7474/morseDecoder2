@@ -60,12 +60,14 @@ typedef struct {
     int   id;
     float freq;
     int   sample_rate;
-    float threshold;
-    float max_power;
+    float avg_power;
+    float on_threshold;
+    float off_threshold;
     int   prev;
     int   count;
     char  symbol[16];
     int   sym_len;
+    float dit;
 } ChannelState;
 
 static void channel_init(ChannelState *c, int id, float freq, int sample_rate)
@@ -73,20 +75,30 @@ static void channel_init(ChannelState *c, int id, float freq, int sample_rate)
     c->id = id;
     c->freq = freq;
     c->sample_rate = sample_rate;
-    c->threshold = 0.5f;
-    c->max_power = 1e-9f;
+    c->avg_power = 0.0f;
+    c->on_threshold = 1.8f;
+    c->off_threshold = 1.2f;
     c->prev = 0;
     c->count = 0;
     c->sym_len = 0;
+    c->dit = 1.2f / 15.0f; /* start at 15 WPM */
 }
 
 static void channel_process(ChannelState *c, const float *samples, size_t len)
 {
+    const float ALPHA = 0.01f;
     float p = goertzel_power(samples, len, c->sample_rate, c->freq);
-    if (p > c->max_power)
-        c->max_power = p;
-    float env = p / c->max_power;
-    int cur = env > c->threshold;
+    if (c->avg_power == 0.0f)
+        c->avg_power = p;
+    else
+        c->avg_power = (1.0f - ALPHA) * c->avg_power + ALPHA * p;
+
+    float ratio = (c->avg_power > 0.0f) ? p / c->avg_power : 0.0f;
+    int cur = c->prev;
+    if (ratio > c->on_threshold)
+        cur = 1;
+    else if (ratio < c->off_threshold)
+        cur = 0;
 
     if (c->count == 0) {
         c->prev = cur;
@@ -99,15 +111,16 @@ static void channel_process(ChannelState *c, const float *samples, size_t len)
         return;
     }
 
-    const float unit = 1.2f / 15.0f; /* dit duration in seconds at 15 WPM */
     float block_time = (float)len / (float)c->sample_rate;
     float duration = c->count * block_time;
 
     if (c->prev) {
-        c->symbol[c->sym_len++] = (duration < unit * 2.0f) ? '.' : '-';
+        const float DIT_ALPHA = 0.2f;
+        c->dit = (1.0f - DIT_ALPHA) * c->dit + DIT_ALPHA * duration;
+        c->symbol[c->sym_len++] = (duration < c->dit * 2.0f) ? '.' : '-';
         printf("Channel %d symbol: %c\n", c->id, c->symbol[c->sym_len - 1]);
     } else {
-        if (duration >= unit * 7.0f) {
+        if (duration >= c->dit * 7.0f) {
             if (c->sym_len) {
                 c->symbol[c->sym_len] = '\0';
                 char ch = lookup_morse(c->symbol);
@@ -115,14 +128,13 @@ static void channel_process(ChannelState *c, const float *samples, size_t len)
                 c->sym_len = 0;
             }
             printf("Channel %d: [space]\n", c->id);
-        } else if (duration >= unit * 3.0f) {
+        } else if (duration >= c->dit * 3.0f) {
             if (c->sym_len) {
                 c->symbol[c->sym_len] = '\0';
                 char ch = lookup_morse(c->symbol);
                 printf("Channel %d: %c\n", c->id, ch);
                 c->sym_len = 0;
             }
-            printf("Channel %d: [space]\n", c->id);
         }
     }
 
