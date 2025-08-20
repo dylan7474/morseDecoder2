@@ -99,15 +99,15 @@ static void channel_process(ChannelState *c, const float *samples, size_t len)
         return;
     }
 
-    const int dash_units = 3;
-    const int letter_gap_units = 3;
-    const int word_gap_units = 7;
+    const float unit = 1.2f / 15.0f; /* dit duration in seconds at 15 WPM */
+    float block_time = (float)len / (float)c->sample_rate;
+    float duration = c->count * block_time;
 
     if (c->prev) {
-        c->symbol[c->sym_len++] = (c->count < dash_units) ? '.' : '-';
+        c->symbol[c->sym_len++] = (duration < unit * 2.0f) ? '.' : '-';
         printf("Channel %d symbol: %c\n", c->id, c->symbol[c->sym_len - 1]);
     } else {
-        if (c->count >= word_gap_units) {
+        if (duration >= unit * 7.0f) {
             if (c->sym_len) {
                 c->symbol[c->sym_len] = '\0';
                 char ch = lookup_morse(c->symbol);
@@ -115,7 +115,7 @@ static void channel_process(ChannelState *c, const float *samples, size_t len)
                 c->sym_len = 0;
             }
             printf("Channel %d: [space]\n", c->id);
-        } else if (c->count >= letter_gap_units) {
+        } else if (duration >= unit * 3.0f) {
             if (c->sym_len) {
                 c->symbol[c->sym_len] = '\0';
                 char ch = lookup_morse(c->symbol);

@@ -18,6 +18,9 @@ make
 
 Each `<freq>` is the frequency in hertz to monitor. Press `Ctrl+C` to quit. A line containing `[space]` indicates a detected word gap.
 
+The decoder assumes an initial speed of 15 words per minute to estimate
+the lengths of dits and dahs.
+
 ## Graphical interface
 
 `make` also builds `morsed-gui`, a graphical application based on the original sine wave detector. It automatically locks onto up to five sine waves and displays the decoded Morse code for each active channel.
