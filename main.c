@@ -7,6 +7,8 @@
 #include <signal.h>
 #include <SDL2/SDL.h>
 
+#define MORSED_VERSION "20250820.223732"
+
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
@@ -200,21 +202,16 @@ static void handle_sigint(int sig)
 
 static bool is_test_key(SDL_Scancode sc, SDL_Keycode sym)
 {
-    return sc == SDL_SCANCODE_PERIOD || sc == SDL_SCANCODE_COMMA ||
-           sc == SDL_SCANCODE_KP_PERIOD || sc == SDL_SCANCODE_SPACE ||
-           sym == SDLK_PERIOD || sym == SDLK_COMMA ||
-           sym == SDLK_KP_PERIOD || sym == SDLK_SPACE;
-}
-
-static bool is_period_key(SDL_Scancode sc, SDL_Keycode sym)
-{
-    return sc == SDL_SCANCODE_PERIOD || sym == SDLK_PERIOD ||
-           sc == SDL_SCANCODE_KP_PERIOD || sym == SDLK_KP_PERIOD;
+    return sc == SDL_SCANCODE_SPACE || sym == SDLK_SPACE;
 }
 
 /* -------------------------------- main --------------------------------- */
 int main(int argc, char **argv)
 {
+    if (argc == 2 && strcmp(argv[1], "-v") == 0) {
+        printf("morsed %s\n", MORSED_VERSION);
+        return 0;
+    }
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <freq> [<freq> ...]\n", argv[0]);
         return 1;
@@ -315,9 +312,11 @@ int main(int argc, char **argv)
             } else if (e.type == SDL_KEYDOWN) {
                 SDL_Scancode sc = e.key.keysym.scancode;
                 SDL_Keycode sym = e.key.keysym.sym;
+                SDL_Log("Key down: scancode=%d (%s) sym=0x%x (%s)",
+                        sc, SDL_GetScancodeName(sc), sym,
+                        SDL_GetKeyName(sym));
                 if (is_test_key(sc, sym)) {
-                    if (is_period_key(sc, sym))
-                        SDL_Log("Period key pressed");
+                    SDL_Log("Test key pressed");
                     key_down = true;
                 } else if (sym == SDLK_m) {
                     manual_speed_mode = !manual_speed_mode;
@@ -336,9 +335,11 @@ int main(int argc, char **argv)
             } else if (e.type == SDL_KEYUP) {
                 SDL_Scancode sc = e.key.keysym.scancode;
                 SDL_Keycode sym = e.key.keysym.sym;
+                SDL_Log("Key up: scancode=%d (%s) sym=0x%x (%s)",
+                        sc, SDL_GetScancodeName(sc), sym,
+                        SDL_GetKeyName(sym));
                 if (is_test_key(sc, sym)) {
-                    if (is_period_key(sc, sym))
-                        SDL_Log("Period key released");
+                    SDL_Log("Test key released");
                     key_down = false;
                 }
             }
