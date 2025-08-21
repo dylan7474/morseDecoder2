@@ -31,7 +31,6 @@
 
 #define VIS_HEIGHT 150         // Height of the visualization area
 #define VIS_PADDING 20         // Padding for the visualization
-#define AVERAGING_ALPHA 0.1     // Smoothing factor for optional averaging filter
 #define CONFIG_FILE "sinDet.cfg"
 
 // --- Global Variables ---
@@ -44,6 +43,7 @@ static double hann_window[FFT_SIZE];
 static double magnitudes[FFT_SIZE / 2]; // Stores normalized spectrum magnitudes for visualization
 static double avg_powers[FFT_SIZE / 2]; // Smoothed power spectrum when averaging filter is enabled
 static bool averaging_enabled = false;  // Toggle for averaging filter
+static double averaging_alpha = 0.1;    // Smoothing factor for averaging filter
 
 static SDL_Window* window = NULL;
 static SDL_Renderer* renderer = NULL;
@@ -401,6 +401,22 @@ int main(int argc, char* argv[]) {
                     sprintf(log_text, "Averaging %s", averaging_enabled ? "ON" : "OFF");
                     Uint32 expire = SDL_GetTicks() + 2000;
                     add_log_line(log_text, (SDL_Color){0, 255, 255, 255}, expire, -1);
+                } else if (event.key.keysym.sym == SDLK_g) {
+                    if (averaging_alpha > 0.01)
+                        averaging_alpha -= 0.01;
+                    if (averaging_alpha < 0.0) averaging_alpha = 0.0;
+                    char log_text[128];
+                    sprintf(log_text, "Avg alpha %.2f", averaging_alpha);
+                    Uint32 expire = SDL_GetTicks() + 2000;
+                    add_log_line(log_text, (SDL_Color){0, 255, 255, 255}, expire, -1);
+                } else if (event.key.keysym.sym == SDLK_h) {
+                    if (averaging_alpha < 1.0)
+                        averaging_alpha += 0.01;
+                    if (averaging_alpha > 1.0) averaging_alpha = 1.0;
+                    char log_text[128];
+                    sprintf(log_text, "Avg alpha %.2f", averaging_alpha);
+                    Uint32 expire = SDL_GetTicks() + 2000;
+                    add_log_line(log_text, (SDL_Color){0, 255, 255, 255}, expire, -1);
                 } else if (event.key.keysym.sym == SDLK_s) {
                     squelch_enabled = !squelch_enabled;
                     char log_text[128];
@@ -509,29 +525,30 @@ int main(int argc, char* argv[]) {
         render_text("LEFT/RIGHT: adjust gain", 100, 120, color_white);
         render_text("Z/X: low cutoff  C/V: high cutoff", 100, 140, color_white);
         render_text("A: toggle averaging", 100, 160, color_white);
-        render_text("S/D/F: squelch toggle/adjust", 100, 180, color_white);
-        render_text("PgUp/PgDn: adjust hold", 100, 200, color_white);
+        render_text("G/H: adjust averaging", 100, 180, color_white);
+        render_text("S/D/F: squelch toggle/adjust", 100, 200, color_white);
+        render_text("PgUp/PgDn: adjust hold", 100, 220, color_white);
         char persist_text[80];
         sprintf(persist_text, "Persistence: %d ms", persistence_threshold_ms);
-        render_text(persist_text, 100, 220, color_white);
+        render_text(persist_text, 100, 240, color_white);
         char hold_text[80];
         sprintf(hold_text, "Hold: %d ms", channel_hold_ms);
-        render_text(hold_text, 100, 240, color_white);
+        render_text(hold_text, 100, 260, color_white);
         char gain_text[80];
         sprintf(gain_text, "Gain: %.1f dB", input_gain_db);
-        render_text(gain_text, 100, 260, color_white);
+        render_text(gain_text, 100, 280, color_white);
         char band_text[120];
         sprintf(band_text, "Band-pass: %.0f-%.0f Hz", bandpass_low_hz, bandpass_high_hz);
-        render_text(band_text, 100, 280, color_white);
+        render_text(band_text, 100, 300, color_white);
         char avg_text[80];
-        sprintf(avg_text, "Averaging: %s", averaging_enabled ? "ON" : "OFF");
-        render_text(avg_text, 100, 300, color_white);
+        sprintf(avg_text, "Averaging: %s (%.2f)", averaging_enabled ? "ON" : "OFF", averaging_alpha);
+        render_text(avg_text, 100, 320, color_white);
         char squelch_text[80];
         sprintf(squelch_text, "Squelch: %s (%.0f%%)", squelch_enabled ? "ON" : "OFF", squelch_threshold * 100.0);
-        render_text(squelch_text, 100, 320, color_white);
+        render_text(squelch_text, 100, 340, color_white);
         // Render detection result just below the configuration text
-        // Start after the last static line (squelch at y=320)
-        int line_y = 320 + line_spacing;
+        // Start after the last static line (squelch at y=340)
+        int line_y = 340 + line_spacing;
         int active_count = 0;
         Uint32 now_render = SDL_GetTicks();
         for (int i = 0; i < MAX_TRACKED_SINES; ++i) {
@@ -718,7 +735,7 @@ void audio_callback(void* userdata, Uint8* stream, int len) {
             power = 0.0; // Apply band-pass filter in frequency domain
         }
         if (averaging_enabled) {
-            avg_powers[i] = AVERAGING_ALPHA * power + (1.0 - AVERAGING_ALPHA) * avg_powers[i];
+            avg_powers[i] = averaging_alpha * power + (1.0 - averaging_alpha) * avg_powers[i];
             power = avg_powers[i];
         } else {
             avg_powers[i] = power;
@@ -906,6 +923,7 @@ void save_config(void) {
     fprintf(f, "bandpass_low_hz=%.2f\n", bandpass_low_hz);
     fprintf(f, "bandpass_high_hz=%.2f\n", bandpass_high_hz);
     fprintf(f, "averaging_enabled=%d\n", averaging_enabled ? 1 : 0);
+    fprintf(f, "averaging_alpha=%.2f\n", averaging_alpha);
     fprintf(f, "squelch_enabled=%d\n", squelch_enabled ? 1 : 0);
     fprintf(f, "squelch_threshold=%.2f\n", squelch_threshold);
     fclose(f);
@@ -932,6 +950,12 @@ void load_config(void) {
             bandpass_high_hz = d;
         } else if (sscanf(line, "averaging_enabled=%d", &i) == 1) {
             averaging_enabled = i ? true : false;
+        } else if (sscanf(line, "averaging_alpha=%lf", &d) == 1) {
+            averaging_alpha = d;
+            if (averaging_alpha < 0.0)
+                averaging_alpha = 0.0;
+            else if (averaging_alpha > 1.0)
+                averaging_alpha = 1.0;
         } else if (sscanf(line, "squelch_enabled=%d", &i) == 1) {
             squelch_enabled = i ? true : false;
         } else if (sscanf(line, "squelch_threshold=%lf", &d) == 1) {
