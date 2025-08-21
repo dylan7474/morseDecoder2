@@ -84,14 +84,15 @@ static void channel_init(ChannelState *c, int id, float freq, int sample_rate)
     c->dit = 1.2f / 15.0f; /* start at 15 WPM */
 }
 
+static float avg_alpha = 0.01f;
+
 static void channel_process(ChannelState *c, const float *samples, size_t len)
 {
-    const float ALPHA = 0.01f;
     float p = goertzel_power(samples, len, c->sample_rate, c->freq);
-    if (c->avg_power == 0.0f)
+    if (c->avg_power == 0.0f || avg_alpha <= 0.0f)
         c->avg_power = p;
     else
-        c->avg_power = (1.0f - ALPHA) * c->avg_power + ALPHA * p;
+        c->avg_power = (1.0f - avg_alpha) * c->avg_power + avg_alpha * p;
 
     float ratio = (c->avg_power > 0.0f) ? p / c->avg_power : 0.0f;
     int cur = c->prev;
@@ -172,28 +173,50 @@ static bool is_period_key(SDL_Scancode sc, SDL_Keycode sym)
 /* -------------------------------- main --------------------------------- */
 int main(int argc, char **argv)
 {
-    if (argc < 2) {
-        fprintf(stderr, "Usage: %s <freq> [<freq> ...]\n", argv[0]);
+    float *freqs = malloc(sizeof(float) * argc);
+    if (!freqs) {
+        fprintf(stderr, "Allocation failed\n");
+        return 1;
+    }
+    int   freq_count = 0;
+
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--avg") == 0 && i + 1 < argc) {
+            avg_alpha = strtof(argv[++i], NULL);
+            if (avg_alpha < 0.0f)
+                avg_alpha = 0.0f;
+            else if (avg_alpha > 1.0f)
+                avg_alpha = 1.0f;
+        } else {
+            freqs[freq_count++] = strtof(argv[i], NULL);
+        }
+    }
+
+    if (freq_count == 0) {
+        fprintf(stderr, "Usage: %s [--avg <alpha>] <freq> [<freq> ...]\n", argv[0]);
+        free(freqs);
         return 1;
     }
 
-    int channel_count = argc - 1;
+    int channel_count = freq_count;
     int sample_rate = 44100;
     size_t block = 1024;
 
     ChannelState *channels = malloc(sizeof(ChannelState) * channel_count);
     if (!channels) {
         fprintf(stderr, "Allocation failed\n");
+        free(freqs);
         return 1;
     }
     for (int i = 0; i < channel_count; ++i) {
-        float f = strtof(argv[i + 1], NULL);
+        float f = freqs[i];
         channel_init(&channels[i], i, f, sample_rate);
     }
 
     if (SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO) < 0) {
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         free(channels);
+        free(freqs);
         return 1;
     }
 
@@ -210,6 +233,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
         SDL_Quit();
         free(channels);
+        free(freqs);
         return 1;
     }
     SDL_ShowWindow(win);
@@ -228,6 +252,7 @@ int main(int argc, char **argv)
         SDL_DestroyWindow(win);
         SDL_Quit();
         free(channels);
+        free(freqs);
         return 1;
     }
 
@@ -238,6 +263,7 @@ int main(int argc, char **argv)
         SDL_DestroyWindow(win);
         SDL_Quit();
         free(channels);
+        free(freqs);
         return 1;
     }
 
@@ -253,6 +279,7 @@ int main(int argc, char **argv)
         SDL_CloseAudioDevice(in_dev);
         SDL_Quit();
         free(channels);
+        free(freqs);
         free(ibuf);
         free(fbuf);
         return 1;
@@ -318,6 +345,7 @@ int main(int argc, char **argv)
     SDL_DestroyWindow(win);
     SDL_Quit();
     free(channels);
+    free(freqs);
     free(ibuf);
     free(fbuf);
     return 0;

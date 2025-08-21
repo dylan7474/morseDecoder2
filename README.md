@@ -13,10 +13,10 @@ make
 ## Usage
 
 ```
-./morsed <freq> [<freq> ...]
+./morsed [--avg <alpha>] <freq> [<freq> ...]
 ```
 
-Each `<freq>` is the frequency in hertz to monitor. Press `Ctrl+C` to quit. A line containing `[space]` indicates a detected word gap.
+Each `<freq>` is the frequency in hertz to monitor. Press `Ctrl+C` to quit. A line containing `[space]` indicates a detected word gap. Use `--avg <alpha>` to adjust the strength of the power averaging filter (0 disables averaging).
 
 Press the `.` key while the `morsed` window has focus to inject an audible test
 tone at the first specified frequency. If `.` does not trigger a tone on your
