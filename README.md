@@ -28,8 +28,11 @@ pressed so you can confirm it is being detected.
 The `morsed` window title includes the build date and time so you can confirm
 which binary version is running.
 
-The decoder assumes an initial speed of 15 words per minute to estimate
-the lengths of dits and dahs.
+The decoder assumes an initial speed of 15 words per minute and continually
+tracks the lengths of dits and dahs to estimate sending speed. Click inside
+the `morsed` window to toggle manual speed control. When manual mode is active,
+use the mouse wheel to increase or decrease the fixed speed. The current mode
+and speed are shown in the window title.
 
 ## Graphical interface
 

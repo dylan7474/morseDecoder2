@@ -68,12 +68,12 @@ typedef struct {
     char  symbol[16];
     int   sym_len;
     float dit;
-    float dot_dur;
-    float dash_dur;
     float wpm;
+    bool  manual;
 } ChannelState;
 
-static void channel_init(ChannelState *c, int id, float freq, int sample_rate)
+static void channel_init(ChannelState *c, int id, float freq, int sample_rate,
+                         bool manual, float wpm)
 {
     c->id = id;
     c->freq = freq;
@@ -84,10 +84,9 @@ static void channel_init(ChannelState *c, int id, float freq, int sample_rate)
     c->prev = 0;
     c->count = 0;
     c->sym_len = 0;
-    c->dit = 1.2f / 15.0f; /* start at 15 WPM */
-    c->dot_dur = c->dit;
-    c->dash_dur = c->dit * 3.0f;
-    c->wpm = 15.0f;
+    c->manual = manual;
+    c->wpm = wpm;
+    c->dit = 1.2f / wpm;
 }
 
 static void channel_process(ChannelState *c, const float *samples, size_t len)
@@ -122,15 +121,16 @@ static void channel_process(ChannelState *c, const float *samples, size_t len)
 
     if (c->prev) {
         const float DIT_ALPHA = 0.2f;
-        float thresh = (c->dot_dur + c->dash_dur) * 0.5f;
+        float thresh = c->dit * 2.0f;
         if (duration < thresh) {
             c->symbol[c->sym_len++] = '.';
-            c->dot_dur = (1.0f - DIT_ALPHA) * c->dot_dur + DIT_ALPHA * duration;
+            if (!c->manual)
+                c->dit = (1.0f - DIT_ALPHA) * c->dit + DIT_ALPHA * duration;
         } else {
             c->symbol[c->sym_len++] = '-';
-            c->dash_dur = (1.0f - DIT_ALPHA) * c->dash_dur + DIT_ALPHA * duration;
+            if (!c->manual)
+                c->dit = (1.0f - DIT_ALPHA) * c->dit + DIT_ALPHA * (duration / 3.0f);
         }
-        c->dit = c->dot_dur;
         c->wpm = 1.2f / c->dit;
         printf("Channel %d symbol: %c (%.1f WPM)\n", c->id, c->symbol[c->sym_len - 1], c->wpm);
     } else {
@@ -179,15 +179,27 @@ static bool is_period_key(SDL_Scancode sc, SDL_Keycode sym)
            sc == SDL_SCANCODE_KP_PERIOD || sym == SDLK_KP_PERIOD;
 }
 
+static void update_window_title(SDL_Window *win, const char *ts, bool manual,
+                                float wpm)
+{
+    char title[128];
+    snprintf(title, sizeof(title), "morsed - %s - %s %.1f WPM", ts,
+             manual ? "manual" : "auto", wpm);
+    SDL_SetWindowTitle(win, title);
+}
+
 /* -------------------------------- main --------------------------------- */
 int main(int argc, char **argv)
 {
+    bool manual_speed = false;
+    float manual_wpm = 15.0f;
+    int argi = 1;
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <freq> [<freq> ...]\n", argv[0]);
         return 1;
     }
 
-    int channel_count = argc - 1;
+    int channel_count = argc - argi;
     int sample_rate = 44100;
     size_t block = 1024;
 
@@ -197,8 +209,8 @@ int main(int argc, char **argv)
         return 1;
     }
     for (int i = 0; i < channel_count; ++i) {
-        float f = strtof(argv[i + 1], NULL);
-        channel_init(&channels[i], i, f, sample_rate);
+        float f = strtof(argv[argi + i], NULL);
+        channel_init(&channels[i], i, f, sample_rate, manual_speed, manual_wpm);
     }
 
     if (SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO) < 0) {
@@ -211,10 +223,8 @@ int main(int argc, char **argv)
     SDL_LogSetAllPriority(SDL_LOG_PRIORITY_INFO);
     SDL_Log("morsed build: %s", build_timestamp);
 
-    /* create small window to receive keyboard events */
-    char title[128];
-    snprintf(title, sizeof(title), "morsed - %s", build_timestamp);
-    SDL_Window *win = SDL_CreateWindow(title, SDL_WINDOWPOS_UNDEFINED,
+    /* create small window to receive events */
+    SDL_Window *win = SDL_CreateWindow("morsed", SDL_WINDOWPOS_UNDEFINED,
                                       SDL_WINDOWPOS_UNDEFINED, 200, 100, 0);
     if (!win) {
         fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
@@ -223,6 +233,7 @@ int main(int argc, char **argv)
         return 1;
     }
     SDL_ShowWindow(win);
+    update_window_title(win, build_timestamp, false, channels[0].wpm);
 
     SDL_AudioSpec want, have;
     SDL_zero(want);
@@ -294,6 +305,36 @@ int main(int argc, char **argv)
                     if (is_period_key(sc, sym))
                         SDL_Log("Period key released");
                     key_down = false;
+                }
+            } else if (e.type == SDL_MOUSEBUTTONDOWN) {
+                if (e.button.button == SDL_BUTTON_LEFT) {
+                    manual_speed = !manual_speed;
+                    if (manual_speed) {
+                        manual_wpm = channels[0].wpm;
+                        for (int c = 0; c < channel_count; ++c) {
+                            channels[c].manual = true;
+                            channels[c].wpm = manual_wpm;
+                            channels[c].dit = 1.2f / manual_wpm;
+                        }
+                    } else {
+                        for (int c = 0; c < channel_count; ++c)
+                            channels[c].manual = false;
+                    }
+                    update_window_title(win, build_timestamp, manual_speed,
+                                        manual_speed ? manual_wpm :
+                                                      channels[0].wpm);
+                }
+            } else if (e.type == SDL_MOUSEWHEEL) {
+                if (manual_speed) {
+                    manual_wpm += e.wheel.y;
+                    if (manual_wpm < 1.0f)
+                        manual_wpm = 1.0f;
+                    for (int c = 0; c < channel_count; ++c) {
+                        channels[c].wpm = manual_wpm;
+                        channels[c].dit = 1.2f / manual_wpm;
+                    }
+                    update_window_title(win, build_timestamp, true, manual_wpm);
+                    SDL_Log("Manual WPM: %.1f", manual_wpm);
                 }
             }
         }
