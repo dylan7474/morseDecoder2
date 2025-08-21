@@ -68,6 +68,9 @@ typedef struct {
     char  symbol[16];
     int   sym_len;
     float dit;
+    float dot_dur;
+    float dash_dur;
+    float wpm;
 } ChannelState;
 
 static void channel_init(ChannelState *c, int id, float freq, int sample_rate)
@@ -82,6 +85,9 @@ static void channel_init(ChannelState *c, int id, float freq, int sample_rate)
     c->count = 0;
     c->sym_len = 0;
     c->dit = 1.2f / 15.0f; /* start at 15 WPM */
+    c->dot_dur = c->dit;
+    c->dash_dur = c->dit * 3.0f;
+    c->wpm = 15.0f;
 }
 
 static void channel_process(ChannelState *c, const float *samples, size_t len)
@@ -116,13 +122,17 @@ static void channel_process(ChannelState *c, const float *samples, size_t len)
 
     if (c->prev) {
         const float DIT_ALPHA = 0.2f;
-        if (duration < c->dit * 2.0f) {
+        float thresh = (c->dot_dur + c->dash_dur) * 0.5f;
+        if (duration < thresh) {
             c->symbol[c->sym_len++] = '.';
-            c->dit = (1.0f - DIT_ALPHA) * c->dit + DIT_ALPHA * duration;
+            c->dot_dur = (1.0f - DIT_ALPHA) * c->dot_dur + DIT_ALPHA * duration;
         } else {
             c->symbol[c->sym_len++] = '-';
+            c->dash_dur = (1.0f - DIT_ALPHA) * c->dash_dur + DIT_ALPHA * duration;
         }
-        printf("Channel %d symbol: %c\n", c->id, c->symbol[c->sym_len - 1]);
+        c->dit = c->dot_dur;
+        c->wpm = 1.2f / c->dit;
+        printf("Channel %d symbol: %c (%.1f WPM)\n", c->id, c->symbol[c->sym_len - 1], c->wpm);
     } else {
         if (duration >= c->dit * 7.0f) {
             if (c->sym_len) {
