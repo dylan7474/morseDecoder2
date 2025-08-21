@@ -73,6 +73,12 @@ typedef struct {
     float wpm;
 } ChannelState;
 
+static bool manual_speed_mode = false;
+static float manual_wpm = 15.0f;
+static bool agc_enabled = true;
+static float agc_gain = 1.0f;
+static const float agc_target = 0.1f;
+
 static void channel_init(ChannelState *c, int id, float freq, int sample_rate)
 {
     c->id = id;
@@ -120,18 +126,28 @@ static void channel_process(ChannelState *c, const float *samples, size_t len)
     float block_time = (float)len / (float)c->sample_rate;
     float duration = c->count * block_time;
 
+    if (manual_speed_mode) {
+        c->dit = 1.2f / manual_wpm;
+        c->dot_dur = c->dit;
+        c->dash_dur = c->dit * 3.0f;
+        c->wpm = manual_wpm;
+    }
+
     if (c->prev) {
         const float DIT_ALPHA = 0.2f;
-        float thresh = (c->dot_dur + c->dash_dur) * 0.5f;
-        if (duration < thresh) {
+        if (duration < c->dit * 2.0f) {
             c->symbol[c->sym_len++] = '.';
-            c->dot_dur = (1.0f - DIT_ALPHA) * c->dot_dur + DIT_ALPHA * duration;
+            if (!manual_speed_mode)
+                c->dot_dur = (1.0f - DIT_ALPHA) * c->dot_dur + DIT_ALPHA * duration;
         } else {
             c->symbol[c->sym_len++] = '-';
-            c->dash_dur = (1.0f - DIT_ALPHA) * c->dash_dur + DIT_ALPHA * duration;
+            if (!manual_speed_mode)
+                c->dash_dur = (1.0f - DIT_ALPHA) * c->dash_dur + DIT_ALPHA * duration;
         }
-        c->dit = c->dot_dur;
-        c->wpm = 1.2f / c->dit;
+        if (!manual_speed_mode) {
+            c->dit = 0.5f * (c->dot_dur + c->dash_dur / 3.0f);
+            c->wpm = 1.2f / c->dit;
+        }
         printf("Channel %d symbol: %c (%.1f WPM)\n", c->id, c->symbol[c->sym_len - 1], c->wpm);
     } else {
         if (duration >= c->dit * 7.0f) {
@@ -154,6 +170,23 @@ static void channel_process(ChannelState *c, const float *samples, size_t len)
 
     c->prev = cur;
     c->count = 1;
+}
+
+static void apply_agc(float *samples, size_t len)
+{
+    if (!agc_enabled)
+        return;
+    float sum = 0.0f;
+    for (size_t i = 0; i < len; ++i)
+        sum += samples[i] * samples[i];
+    float rms = sqrtf(sum / (float)len);
+    if (rms > 0.0f) {
+        const float ALPHA = 0.001f;
+        float g = agc_target / (rms + 1e-6f);
+        agc_gain = (1.0f - ALPHA) * agc_gain + ALPHA * g;
+    }
+    for (size_t i = 0; i < len; ++i)
+        samples[i] *= agc_gain;
 }
 
 /* --------------------------- Signal handling ---------------------------- */
@@ -286,6 +319,19 @@ int main(int argc, char **argv)
                     if (is_period_key(sc, sym))
                         SDL_Log("Period key pressed");
                     key_down = true;
+                } else if (sym == SDLK_m) {
+                    manual_speed_mode = !manual_speed_mode;
+                    SDL_Log("Manual speed %s", manual_speed_mode ? "ON" : "OFF");
+                } else if (sym == SDLK_MINUS) {
+                    if (manual_wpm > 5.0f)
+                        manual_wpm -= 1.0f;
+                    SDL_Log("Manual WPM %.1f", manual_wpm);
+                } else if (sym == SDLK_EQUALS) {
+                    manual_wpm += 1.0f;
+                    SDL_Log("Manual WPM %.1f", manual_wpm);
+                } else if (sym == SDLK_g) {
+                    agc_enabled = !agc_enabled;
+                    SDL_Log("AGC %s", agc_enabled ? "ON" : "OFF");
                 }
             } else if (e.type == SDL_KEYUP) {
                 SDL_Scancode sc = e.key.keysym.scancode;
@@ -309,6 +355,7 @@ int main(int argc, char **argv)
                 ibuf[i] = (int16_t)(sample * 32767.0f);
             }
             SDL_QueueAudio(out_dev, ibuf, block * bytes_per_sample);
+            apply_agc(fbuf, block);
             for (int c = 0; c < channel_count; ++c)
                 channel_process(&channels[c], fbuf, block);
             SDL_Delay(block_ms);
@@ -316,6 +363,7 @@ int main(int argc, char **argv)
             SDL_DequeueAudio(in_dev, ibuf, block * bytes_per_sample);
             for (size_t i = 0; i < block; ++i)
                 fbuf[i] = (float)ibuf[i] / 32768.0f;
+            apply_agc(fbuf, block);
             for (int c = 0; c < channel_count; ++c)
                 channel_process(&channels[c], fbuf, block);
         } else {
