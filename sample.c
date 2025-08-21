@@ -63,6 +63,11 @@ typedef struct {
 
 static SineTrack tracks[MAX_TRACKED_SINES];
 static bool keep_running = true;
+static bool manual_speed_mode = false;
+static double manual_wpm = 15.0;
+static bool agc_enabled = true;
+static double agc_gain = 1.0;
+static const double agc_target = 0.1;
 
 /* ---------------------- Morse decoding helpers ---------------------- */
 typedef struct {
@@ -106,6 +111,9 @@ typedef struct {
     bool   pending_space;
     bool   reset_text;
     double dit;
+    double dot_dur;
+    double dash_dur;
+    double wpm;
 } MorseChannel;
 
 static MorseChannel morse_channels[MAX_TRACKED_SINES];
@@ -125,6 +133,9 @@ static void morse_channel_init(MorseChannel *c)
     c->pending_space = false;
     c->reset_text = true;
     c->dit = 1.2 / 15.0;
+    c->dot_dur = c->dit;
+    c->dash_dur = c->dit * 3.0;
+    c->wpm = 15.0;
 }
 
 static void morse_channel_flush(MorseChannel *c, bool add_space)
@@ -170,14 +181,28 @@ static void morse_channel_update(MorseChannel *c, double power)
     double block_time = (double)CHUNK_SIZE / SAMPLE_RATE;
     double duration = c->count * block_time;
 
+    if (manual_speed_mode) {
+        c->dit = 1.2 / manual_wpm;
+        c->dot_dur = c->dit;
+        c->dash_dur = c->dit * 3.0;
+        c->wpm = manual_wpm;
+    }
+
     if (c->prev) {
         const double DIT_ALPHA = 0.2;
         char sym;
         if (duration < c->dit * 2.0) {
             sym = '.';
-            c->dit = (1.0 - DIT_ALPHA) * c->dit + DIT_ALPHA * duration;
+            if (!manual_speed_mode)
+                c->dot_dur = (1.0 - DIT_ALPHA) * c->dot_dur + DIT_ALPHA * duration;
         } else {
             sym = '-';
+            if (!manual_speed_mode)
+                c->dash_dur = (1.0 - DIT_ALPHA) * c->dash_dur + DIT_ALPHA * duration;
+        }
+        if (!manual_speed_mode) {
+            c->dit = 0.5 * (c->dot_dur + c->dash_dur / 3.0);
+            c->wpm = 1.2 / c->dit;
         }
         c->symbol[c->sym_len++] = sym;
         c->pending_symbol = sym;
@@ -417,6 +442,22 @@ int main(int argc, char* argv[]) {
                         squelch_threshold += 0.01;
                         if (squelch_threshold > 1.0) squelch_threshold = 1.0;
                     }
+                } else if (event.key.keysym.sym == SDLK_m) {
+                    manual_speed_mode = !manual_speed_mode;
+                    char log_text[128];
+                    sprintf(log_text, "Manual speed %s", manual_speed_mode ? "ON" : "OFF");
+                    Uint32 expire = SDL_GetTicks() + 2000;
+                    add_log_line(log_text, (SDL_Color){255, 255, 255, 255}, expire, -1);
+                } else if (event.key.keysym.sym == SDLK_MINUS) {
+                    if (manual_wpm > 5.0) manual_wpm -= 1.0;
+                } else if (event.key.keysym.sym == SDLK_EQUALS) {
+                    manual_wpm += 1.0;
+                } else if (event.key.keysym.sym == SDLK_g) {
+                    agc_enabled = !agc_enabled;
+                    char log_text[128];
+                    sprintf(log_text, "AGC %s", agc_enabled ? "ON" : "OFF");
+                    Uint32 expire = SDL_GetTicks() + 2000;
+                    add_log_line(log_text, (SDL_Color){255, 255, 255, 255}, expire, -1);
                 }
             }
         }
@@ -526,12 +567,21 @@ int main(int argc, char* argv[]) {
         char avg_text[80];
         sprintf(avg_text, "Averaging: %s", averaging_enabled ? "ON" : "OFF");
         render_text(avg_text, 100, 300, color_white);
+        char agc_text[80];
+        sprintf(agc_text, "AGC: %s", agc_enabled ? "ON" : "OFF");
+        render_text(agc_text, 100, 320, color_white);
         char squelch_text[80];
         sprintf(squelch_text, "Squelch: %s (%.0f%%)", squelch_enabled ? "ON" : "OFF", squelch_threshold * 100.0);
-        render_text(squelch_text, 100, 320, color_white);
+        render_text(squelch_text, 100, 340, color_white);
+        char speed_text[80];
+        if (manual_speed_mode)
+            sprintf(speed_text, "Speed: manual %.1f WPM", manual_wpm);
+        else
+            sprintf(speed_text, "Speed: auto (%.1f WPM)", morse_channels[0].wpm);
+        render_text(speed_text, 100, 360, color_white);
         // Render detection result just below the configuration text
-        // Start after the last static line (squelch at y=320)
-        int line_y = 320 + line_spacing;
+        // Start after the last static line (speed at y=360)
+        int line_y = 360 + line_spacing;
         int active_count = 0;
         Uint32 now_render = SDL_GetTicks();
         for (int i = 0; i < MAX_TRACKED_SINES; ++i) {
@@ -700,9 +750,21 @@ void update_track(double freq, double purity, Uint32 now) {
 // This function is called by SDL whenever it has a new chunk of audio data
 void audio_callback(void* userdata, Uint8* stream, int len) {
     Sint16* pcm_stream = (Sint16*)stream;
-    double gain = pow(10.0, input_gain_db / 20.0);
+    double rms = 0.0;
     for (int i = 0; i < CHUNK_SIZE; ++i) {
-        pcm_buffer[i] = ((double)pcm_stream[i] / MAX_AMPLITUDE) * gain * hann_window[i];
+        double s = (double)pcm_stream[i] / MAX_AMPLITUDE;
+        rms += s * s;
+    }
+    rms = sqrt(rms / CHUNK_SIZE);
+    if (agc_enabled && rms > 0.0) {
+        const double ALPHA = 0.001;
+        double g = agc_target / (rms + 1e-9);
+        agc_gain = (1.0 - ALPHA) * agc_gain + ALPHA * g;
+    }
+    double gain = pow(10.0, input_gain_db / 20.0) * agc_gain;
+    for (int i = 0; i < CHUNK_SIZE; ++i) {
+        double s = (double)pcm_stream[i] / MAX_AMPLITUDE;
+        pcm_buffer[i] = s * gain * hann_window[i];
     }
     fftw_execute(p);
 
