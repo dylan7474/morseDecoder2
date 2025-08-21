@@ -635,10 +635,21 @@ int main(int argc, char* argv[]) {
         SDL_SetRenderDrawColor(morse_renderer, 0, 0, 0, 255);
         SDL_RenderClear(morse_renderer);
         SDL_Color mcolor = {255, 255, 255, 255};
+        int mw, mh;
+        SDL_GetWindowSize(morse_window, &mw, &mh);
+        int available = mw - 20; // account for padding
         for (int i = 0; i < MAX_TRACKED_SINES; ++i) {
             char line[300];
-            snprintf(line, sizeof(line), "Ch%d: %.240s", i, morse_symbols[i]);
-            render_text_to(morse_renderer, line, 10, 10 + i * line_spacing, mcolor);
+            snprintf(line, sizeof(line), "Ch%d: %s", i, morse_symbols[i]);
+
+            int text_w = 0;
+            TTF_SizeText(font, line, &text_w, NULL);
+            int x = 10;
+            if (text_w > available) {
+                x -= (text_w - available); // scroll to keep newest text visible
+            }
+
+            render_text_to(morse_renderer, line, x, 10 + i * line_spacing, mcolor);
         }
         SDL_RenderPresent(morse_renderer);
 
