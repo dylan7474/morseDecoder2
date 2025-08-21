@@ -179,26 +179,23 @@ static bool is_period_key(SDL_Scancode sc, SDL_Keycode sym)
            sc == SDL_SCANCODE_KP_PERIOD || sym == SDLK_KP_PERIOD;
 }
 
+static void update_window_title(SDL_Window *win, const char *ts, bool manual,
+                                float wpm)
+{
+    char title[128];
+    snprintf(title, sizeof(title), "morsed - %s - %s %.1f WPM", ts,
+             manual ? "manual" : "auto", wpm);
+    SDL_SetWindowTitle(win, title);
+}
+
 /* -------------------------------- main --------------------------------- */
 int main(int argc, char **argv)
 {
     bool manual_speed = false;
     float manual_wpm = 15.0f;
     int argi = 1;
-    while (argi < argc) {
-        if (strcmp(argv[argi], "--manual") == 0 || strcmp(argv[argi], "-m") == 0) {
-            manual_speed = true;
-            argi++;
-        } else if ((strcmp(argv[argi], "--wpm") == 0 || strcmp(argv[argi], "-w") == 0) && argi + 1 < argc) {
-            manual_wpm = strtof(argv[argi + 1], NULL);
-            argi += 2;
-        } else {
-            break;
-        }
-    }
-
-    if (argi >= argc) {
-        fprintf(stderr, "Usage: %s [--manual] [--wpm <speed>] <freq> [<freq> ...]\n", argv[0]);
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s <freq> [<freq> ...]\n", argv[0]);
         return 1;
     }
 
@@ -226,10 +223,8 @@ int main(int argc, char **argv)
     SDL_LogSetAllPriority(SDL_LOG_PRIORITY_INFO);
     SDL_Log("morsed build: %s", build_timestamp);
 
-    /* create small window to receive keyboard events */
-    char title[128];
-    snprintf(title, sizeof(title), "morsed - %s", build_timestamp);
-    SDL_Window *win = SDL_CreateWindow(title, SDL_WINDOWPOS_UNDEFINED,
+    /* create small window to receive events */
+    SDL_Window *win = SDL_CreateWindow("morsed", SDL_WINDOWPOS_UNDEFINED,
                                       SDL_WINDOWPOS_UNDEFINED, 200, 100, 0);
     if (!win) {
         fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
@@ -238,6 +233,7 @@ int main(int argc, char **argv)
         return 1;
     }
     SDL_ShowWindow(win);
+    update_window_title(win, build_timestamp, false, channels[0].wpm);
 
     SDL_AudioSpec want, have;
     SDL_zero(want);
@@ -297,23 +293,7 @@ int main(int argc, char **argv)
             } else if (e.type == SDL_KEYDOWN) {
                 SDL_Scancode sc = e.key.keysym.scancode;
                 SDL_Keycode sym = e.key.keysym.sym;
-                if (manual_speed && (sym == SDLK_PLUS || sym == SDLK_EQUALS ||
-                                     sym == SDLK_KP_PLUS)) {
-                    manual_wpm += 1.0f;
-                    for (int c = 0; c < channel_count; ++c) {
-                        channels[c].wpm = manual_wpm;
-                        channels[c].dit = 1.2f / manual_wpm;
-                    }
-                    SDL_Log("Manual WPM: %.1f", manual_wpm);
-                } else if (manual_speed && (sym == SDLK_MINUS || sym == SDLK_KP_MINUS)) {
-                    if (manual_wpm > 1.0f)
-                        manual_wpm -= 1.0f;
-                    for (int c = 0; c < channel_count; ++c) {
-                        channels[c].wpm = manual_wpm;
-                        channels[c].dit = 1.2f / manual_wpm;
-                    }
-                    SDL_Log("Manual WPM: %.1f", manual_wpm);
-                } else if (is_test_key(sc, sym)) {
+                if (is_test_key(sc, sym)) {
                     if (is_period_key(sc, sym))
                         SDL_Log("Period key pressed");
                     key_down = true;
@@ -325,6 +305,36 @@ int main(int argc, char **argv)
                     if (is_period_key(sc, sym))
                         SDL_Log("Period key released");
                     key_down = false;
+                }
+            } else if (e.type == SDL_MOUSEBUTTONDOWN) {
+                if (e.button.button == SDL_BUTTON_LEFT) {
+                    manual_speed = !manual_speed;
+                    if (manual_speed) {
+                        manual_wpm = channels[0].wpm;
+                        for (int c = 0; c < channel_count; ++c) {
+                            channels[c].manual = true;
+                            channels[c].wpm = manual_wpm;
+                            channels[c].dit = 1.2f / manual_wpm;
+                        }
+                    } else {
+                        for (int c = 0; c < channel_count; ++c)
+                            channels[c].manual = false;
+                    }
+                    update_window_title(win, build_timestamp, manual_speed,
+                                        manual_speed ? manual_wpm :
+                                                      channels[0].wpm);
+                }
+            } else if (e.type == SDL_MOUSEWHEEL) {
+                if (manual_speed) {
+                    manual_wpm += e.wheel.y;
+                    if (manual_wpm < 1.0f)
+                        manual_wpm = 1.0f;
+                    for (int c = 0; c < channel_count; ++c) {
+                        channels[c].wpm = manual_wpm;
+                        channels[c].dit = 1.2f / manual_wpm;
+                    }
+                    update_window_title(win, build_timestamp, true, manual_wpm);
+                    SDL_Log("Manual WPM: %.1f", manual_wpm);
                 }
             }
         }
